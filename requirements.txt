@@ -1,0 +1,34 @@
+# TCLaaC - The Command Line as a Corpus
+# Requirements for NLP-based command line analysis using LDA
+
+# Core Data Science
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Machine Learning & NLP
+scikit-learn>=1.3.0
+gensim>=4.3.0
+
+# Visualization
+plotly>=5.14.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Jupyter Notebook
+jupyter>=1.0.0
+ipywidgets>=8.0.0
+notebook>=6.5.0
+
+# Text Processing & Fuzzy Matching
+rapidfuzz>=3.0.0
+pyyaml>=6.0
+
+# Utilities
+joblib>=1.3.0
+tqdm>=4.65.0
+
+# Optional: Hyperparameter Optimization (if using Optuna)
+optuna>=3.1.0
+
+# Optional: For ISF integration (custom module)
+# ionic_scripting_framework  # Add if available via pip or custom install

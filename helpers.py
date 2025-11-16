@@ -13,9 +13,7 @@ import pandas as pd
 from rapidfuzz import fuzz
 import re
 import numpy as np
-from sklearn.decomposition import LatentDirichletAllocation,NMF
-from sklearn.manifold import MDS
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.decomposition import LatentDirichletAllocation
 from gensim.corpora import Dictionary
 from gensim.models import LdaMulticore, CoherenceModel, LdaModel
 import time
@@ -23,6 +21,9 @@ import shlex
 import ntpath
 import yaml
 import glob
+import logging
+
+logger = logging.getLogger(__name__)
 
 # A dictionary of compiled regular expression rules used for normalizing
 # command-line strings. Each key represents a category of patterns to be
@@ -119,6 +120,10 @@ def normalize_command(command_str: str, rules_dict: dict, max_loops: int = 15) -
             break
             
         loops += 1
+    
+    # Warn if max loops reached (potential normalization issue)
+    if loops >= max_loops:
+        logger.warning(f"Normalization reached max loops ({max_loops}) for command: {command_str[:100]}...")
         
     return command_str
 
@@ -262,40 +267,7 @@ def identify_root(cmd_string: str) -> str:
     executable_name = ntpath.basename(full_root_path.strip('"'))
 
     return executable_name
-    
 
-# def summarize_flags(normalized_str: str) -> str:
-#     """
-#     Counts <FLAG> tokens in a string. If any are found, it removes
-#     them and appends a summary token. If not, it returns the
-#     original string unmodified.
-#     """
-#     if not isinstance(normalized_str, str):
-#         return ""
-
-#     # 1. Count the number of flag tokens
-#     flag_count = normalized_str.count('<FLAG>')
-    
-#     # If no flags are found, do nothing and return the original string
-#     if flag_count == 0:
-#         return normalized_str
-    
-#     # 2. Determine the summary token for commands that have flags
-#     summary_token = ''
-#     if flag_count <= 2:
-#         summary_token = '<FEW_FLAGS>'
-#     elif flag_count <= 5:
-#         summary_token = '<MEDIUM_FLAGS>'
-#     else:
-#         summary_token = '<MANY_FLAGS>'
-        
-#     # 3. Remove all individual <FLAG> tokens
-#     temp_str = normalized_str.replace('<FLAG>', ' ')
-    
-#     # 4. Clean up extra whitespace and append the summary token
-#     final_str = ' '.join(temp_str.split()) + ' ' + summary_token
-    
-#     return final_str
 
 def isolate_anomalous_logs(df: pd.DataFrame, text_column: str, min_df_threshold: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
     """

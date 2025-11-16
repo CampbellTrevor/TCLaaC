@@ -156,18 +156,32 @@ def create_topic_treemap_gensim(df_with_topics: pd.DataFrame, lda_model: LdaMult
     # template, compare it against the identified canonical representatives. If a
     # match is found above the similarity threshold, group it; otherwise, it
     # becomes a new canonical representative for its group.
+    # OPTIMIZATION: Use process.extractOne for faster fuzzy matching
+    from rapidfuzz import process
+    
     for bucket in template_buckets.values():
         canonical_reps = []
         for template in bucket:
-            is_grouped = False
-            for rep in canonical_reps:
-                if fuzz.ratio(template, rep) > similarity_threshold:
-                    template_groups[template] = rep
-                    is_grouped = True
-                    break
-            if not is_grouped:
+            if not canonical_reps:
+                # First template in bucket becomes canonical
                 template_groups[template] = template
                 canonical_reps.append(template)
+            else:
+                # Use extractOne for O(n) instead of O(n²) comparison
+                best_match = process.extractOne(
+                    template, 
+                    canonical_reps, 
+                    scorer=fuzz.ratio,
+                    score_cutoff=similarity_threshold
+                )
+                
+                if best_match:
+                    # Match found, group with canonical representative
+                    template_groups[template] = best_match[0]
+                else:
+                    # No match, this becomes a new canonical rep
+                    template_groups[template] = template
+                    canonical_reps.append(template)
 
     # Map the group assignments back to the main DataFrame.
     df_with_topics['command_group'] = df_with_topics['normalized_command'].map(template_groups)

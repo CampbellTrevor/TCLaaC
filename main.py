@@ -481,56 +481,64 @@ class TCLaaCPipeline:
     
     def create_analysis_visualizations(self, output_dir: str = '.'):
         """
-        Generate comprehensive analysis visualizations for data exploration.
+        Generate a comprehensive Single Page Application (SPA) with all visualizations.
         
         Args:
-            output_dir: Directory to save visualization files
+            output_dir: Directory to save visualization file
         """
         logger.info("=" * 70)
-        logger.info("CREATING ANALYSIS VISUALIZATIONS")
+        logger.info("CREATING ANALYSIS DASHBOARD (SPA)")
         logger.info("=" * 70)
         
         from graphs import (
             create_topic_heatmap, 
             create_security_score_chart,
             create_topic_distribution_chart,
-            create_command_length_distribution
+            create_command_length_distribution,
+            create_analysis_spa
         )
         
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
         try:
-            # 1. Topic-Word Heatmap
-            logger.info("Generating topic-word heatmap...")
-            fig = create_topic_heatmap(self.df_with_topics, self.lda_model)
-            heatmap_path = output_path / 'topic_word_heatmap.html'
-            fig.write_html(str(heatmap_path))
-            logger.info(f"✓ Heatmap saved to: {heatmap_path}")
+            logger.info("Generating all visualizations...")
             
-            # 2. Security Score Chart (if analysis was performed)
+            # Generate individual plots
+            treemap_fig = create_topic_treemap_gensim(
+                self.df_with_topics,
+                self.lda_model,
+                similarity_threshold=config.SIMILARITY_THRESHOLD
+            )
+            
+            heatmap_fig = create_topic_heatmap(self.df_with_topics, self.lda_model)
+            
+            security_fig = None
             if hasattr(self, 'topic_scores') and self.topic_scores is not None:
-                logger.info("Generating security risk chart...")
-                fig = create_security_score_chart(self.topic_scores, self.df_with_topics, self.lda_model)
-                security_path = output_path / 'security_risk_chart.html'
-                fig.write_html(str(security_path))
-                logger.info(f"✓ Security chart saved to: {security_path}")
+                security_fig = create_security_score_chart(self.topic_scores, self.df_with_topics, self.lda_model)
             
-            # 3. Topic Distribution Sunburst
-            logger.info("Generating topic distribution sunburst...")
-            fig = create_topic_distribution_chart(self.df_with_topics, self.lda_model)
-            sunburst_path = output_path / 'topic_distribution_sunburst.html'
-            fig.write_html(str(sunburst_path))
-            logger.info(f"✓ Sunburst saved to: {sunburst_path}")
+            sunburst_fig = create_topic_distribution_chart(self.df_with_topics, self.lda_model)
             
-            # 4. Command Length Distribution
-            logger.info("Generating command length distribution...")
-            fig = create_command_length_distribution(self.df_with_topics)
-            length_path = output_path / 'command_length_boxplot.html'
-            fig.write_html(str(length_path))
-            logger.info(f"✓ Box plot saved to: {length_path}")
+            length_fig = create_command_length_distribution(self.df_with_topics)
             
-            logger.info(f"\n✓ All visualizations created in: {output_path}\n")
+            # Get LOLBAS keywords for filtering
+            lolbas_keywords = []
+            if os.path.exists(LOLBAS_REPO_PATH):
+                lolbas_keywords = generate_keywords_from_lolbas(LOLBAS_REPO_PATH)
+            
+            # Create SPA combining all visualizations
+            spa_path = output_path / 'analysis_dashboard.html'
+            create_analysis_spa(
+                treemap_fig=treemap_fig,
+                heatmap_fig=heatmap_fig,
+                security_fig=security_fig,
+                sunburst_fig=sunburst_fig,
+                length_fig=length_fig,
+                lolbas_keywords=lolbas_keywords,
+                output_path=str(spa_path)
+            )
+            
+            logger.info(f"✓ Analysis dashboard created: {spa_path}\n")
             
         except Exception as e:
             logger.error(f"Error creating visualizations: {e}")
@@ -614,9 +622,7 @@ class TCLaaCPipeline:
             self.analyze_security()
             
             if visualize:
-                viz_path = Path(output_dir) / 'topic_treemap.html'
-                self.visualize(str(viz_path))
-                # Generate comprehensive analysis visualizations
+                # Generate comprehensive analysis dashboard (SPA)
                 self.create_analysis_visualizations(output_dir)
             
             self.save_results(output_dir)
@@ -641,8 +647,8 @@ Examples:
   # Analyze CSV file
   python main.py --input data.csv --output results/
   
-  # Generate synthetic data and tune hyperparameters
-  python main.py --synthetic 10000 --tune --output test_results/
+  # Generate synthetic data (tuning runs by default)
+  python main.py --synthetic 10000 --output test_results/
   
   # Quick analysis with specific topic count
   python main.py --input data.csv --topics 15 --no-visualize
@@ -674,9 +680,9 @@ Examples:
         help=f'Number of topics for LDA model (default: {NUM_TOPICS})'
     )
     parser.add_argument(
-        '--tune',
+        '--no-tune',
         action='store_true',
-        help='Run hyperparameter tuning (slower but finds optimal topic count)'
+        help='Skip hyperparameter tuning (faster but uses default topic count)'
     )
     parser.add_argument(
         '--limit', '-l',
@@ -736,7 +742,7 @@ Examples:
     pipeline.run_full_pipeline(
         source=source,
         is_synthetic=is_synthetic,
-        tune=args.tune,
+        tune=not args.no_tune,  # Tune by default unless --no-tune is specified
         visualize=not args.no_visualize,
         output_dir=args.output,
         limit=args.limit

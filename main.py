@@ -30,7 +30,7 @@ from gensim.models import LdaMulticore, CoherenceModel
 # Local imports
 import config
 from config import (
-    NUM_TOPICS, RANDOM_STATE, LDA_ALPHA, LDA_ETA, LDA_PASSES,
+    NUM_TOPICS, RANDOM_STATE, LDA_ALPHA, LDA_ETA, LDA_PASSES, LDA_ITERATIONS,
     MIN_DOC_LENGTH, NUM_WORKERS, LOLBAS_REPO_PATH, MODEL_FILENAME,
     ANALYSIS_DATAFRAME_FILENAME, COHERENCE_METHOD, MAX_TUNING_SAMPLE
 )
@@ -99,13 +99,15 @@ class TCLaaCPipeline:
         
         if is_synthetic:
             num_samples = int(source) if isinstance(source, (int, str)) else 10000
+            logger.info(f"Generating {num_samples} synthetic command lines...")
             self.data = generate_synthetic_data(num_samples, seed=self.random_state)
         else:
+            logger.info(f"Loading data from: {source}")
             self.data = load_from_csv(source)
         
         # Apply limit if specified
         if limit and len(self.data) > limit:
-            logger.info(f"Limiting dataset to {limit} rows (from {len(self.data)})")
+            logger.info(f"Limiting dataset to {limit} rows")
             self.data = self.data.sample(n=limit, random_state=self.random_state)
         
         validate_dataframe(self.data)
@@ -150,11 +152,9 @@ class TCLaaCPipeline:
         
         start_time = time.time()
         
-        if use_multiprocessing:
-            logger.info("Using multiprocessing for faster preprocessing...")
+        if use_multiprocessing and len(self.data) > 100:
             self._preprocess_parallel()
         else:
-            logger.info("Using sequential processing...")
             self._preprocess_sequential()
         
         # Filter out short documents
@@ -164,20 +164,21 @@ class TCLaaCPipeline:
         
         elapsed = time.time() - start_time
         logger.info(f"✓ Preprocessing complete in {elapsed:.2f}s")
-        logger.info(f"  Filtered {filtered} short documents (< {MIN_DOC_LENGTH} tokens)")
+        if filtered > 0:
+            logger.info(f"  Filtered {filtered} short documents (< {MIN_DOC_LENGTH} tokens)")
         logger.info(f"  Final dataset: {len(self.data)} rows\n")
     
     def _preprocess_sequential(self):
         """Sequential preprocessing with progress bar."""
-        tqdm.pandas(desc="Normalizing")
+        tqdm.pandas(desc="⚙ Normalizing", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}')
         self.data['normalized_command'] = self.data['command_line'].progress_apply(
             lambda x: normalize_command(x, NORMALIZATION_RULES_COMPILED)
         )
         
-        tqdm.pandas(desc="Tokenizing")
+        tqdm.pandas(desc="⚙ Tokenizing", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}')
         self.data['tokens'] = self.data['normalized_command'].progress_apply(tokenize)
         
-        tqdm.pandas(desc="Identifying roots")
+        tqdm.pandas(desc="⚙ Root identification", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}')
         self.data['root_command'] = self.data['command_line'].progress_apply(identify_root)
     
     def _preprocess_parallel(self):
@@ -186,37 +187,36 @@ class TCLaaCPipeline:
         import functools
         
         command_lines = self.data['command_line'].tolist()
-        num_cores = cpu_count()
-        
-        logger.info(f"Using {num_cores} CPU cores")
+        num_cores = min(cpu_count(), 8)  # Cap at 8 cores for efficiency
+        chunksize = max(1, len(command_lines) // (num_cores * 4))
         
         with Pool(processes=num_cores) as pool:
             # Normalize
-            logger.info("Normalizing commands...")
             partial_normalize = functools.partial(
                 normalize_command,
                 rules_dict=NORMALIZATION_RULES_COMPILED
             )
             normalized = list(tqdm(
-                pool.imap(partial_normalize, command_lines),
+                pool.imap(partial_normalize, command_lines, chunksize=chunksize),
                 total=len(command_lines),
-                desc="Normalizing"
+                desc="⚙ Normalizing",
+                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
             ))
             
             # Tokenize
-            logger.info("Tokenizing commands...")
             tokenized = list(tqdm(
-                pool.imap(tokenize, normalized),
+                pool.imap(tokenize, normalized, chunksize=chunksize),
                 total=len(normalized),
-                desc="Tokenizing"
+                desc="⚙ Tokenizing",
+                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
             ))
             
             # Identify roots
-            logger.info("Identifying root commands...")
             roots = list(tqdm(
-                pool.imap(identify_root, command_lines),
+                pool.imap(identify_root, command_lines, chunksize=chunksize),
                 total=len(command_lines),
-                desc="Root identification"
+                desc="⚙ Root identification",
+                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
             ))
         
         self.data['normalized_command'] = normalized
@@ -233,12 +233,14 @@ class TCLaaCPipeline:
         
         tokens_list = self.data['tokens'].tolist()
         
-        logger.info("Creating Gensim dictionary...")
         self.dictionary = Dictionary(tokens_list)
-        logger.info(f"Dictionary contains {len(self.dictionary)} unique tokens")
+        logger.info(f"Dictionary: {len(self.dictionary)} unique tokens")
         
-        logger.info("Converting to bag-of-words corpus...")
-        self.corpus = [self.dictionary.doc2bow(tokens) for tokens in tqdm(tokens_list, desc="Creating corpus")]
+        self.corpus = [self.dictionary.doc2bow(tokens) for tokens in tqdm(
+            tokens_list, 
+            desc="⚙ Building corpus",
+            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}]'
+        )]
         
         logger.info(f"✓ Corpus prepared: {len(self.corpus)} documents\n")
     
@@ -260,10 +262,10 @@ class TCLaaCPipeline:
                 config.TUNING_STEP
             )
         
-        # Sample data for faster tuning
+        # Sample data for faster tuning with adaptive sampling
         sample_size = min(len(self.corpus), MAX_TUNING_SAMPLE)
         if sample_size < len(self.corpus):
-            logger.info(f"Sampling {sample_size} documents for tuning (full dataset: {len(self.corpus)})")
+            logger.info(f"Using {sample_size} documents for tuning")
             import random
             random.seed(self.random_state)
             indices = random.sample(range(len(self.corpus)), sample_size)
@@ -274,13 +276,11 @@ class TCLaaCPipeline:
             sample_tokens = self.data['tokens'].tolist()
         
         # Tune number of topics
-        logger.info(f"Tuning number of topics (range: {topic_range[0]}-{topic_range[1]}, step: {topic_range[2]})...")
         best_num_topics, coherence_scores = self._tune_num_topics(
             sample_corpus, sample_tokens, topic_range
         )
         
-        logger.info(f"✓ Best number of topics: {best_num_topics}")
-        logger.info(f"  Coherence score: {max(coherence_scores):.4f}\n")
+        logger.info(f"✓ Best number of topics: {best_num_topics} (coherence: {max(coherence_scores):.4f})\n")
         
         # Update configuration
         self.num_topics = best_num_topics
@@ -293,14 +293,25 @@ class TCLaaCPipeline:
         coherence_scores = []
         topic_numbers = list(range(start, stop, step))
         
-        for num_topics in tqdm(topic_numbers, desc="Training models"):
+        # Progress bar with better formatting
+        pbar = tqdm(
+            topic_numbers, 
+            desc="⚙ Tuning topics",
+            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
+        )
+        
+        for num_topics in pbar:
+            pbar.set_postfix({'topics': num_topics})
+            
             model = LdaMulticore(
                 corpus=corpus,
                 id2word=self.dictionary,
                 num_topics=num_topics,
                 random_state=self.random_state,
                 workers=NUM_WORKERS,
-                passes=5  # Fewer passes for tuning
+                passes=3,  # Reduced passes for faster tuning
+                iterations=50,  # Fewer iterations
+                chunksize=min(2000, len(corpus))
             )
             
             coherence_model = CoherenceModel(
@@ -309,7 +320,9 @@ class TCLaaCPipeline:
                 dictionary=self.dictionary,
                 coherence=COHERENCE_METHOD
             )
-            coherence_scores.append(coherence_model.get_coherence())
+            score = coherence_model.get_coherence()
+            coherence_scores.append(score)
+            pbar.set_postfix({'topics': num_topics, 'coherence': f'{score:.3f}'})
         
         # Find best score
         best_idx = np.argmax(coherence_scores)
@@ -325,10 +338,15 @@ class TCLaaCPipeline:
         logger.info("STEP 6: MODEL TRAINING")
         logger.info("=" * 70)
         
-        logger.info(f"Training LDA model with {self.num_topics} topics...")
-        logger.info(f"Parameters: alpha={LDA_ALPHA}, eta={LDA_ETA}, passes={LDA_PASSES}")
+        logger.info(f"Training LDA model: {self.num_topics} topics, {len(self.corpus)} documents")
         
         start_time = time.time()
+        
+        # Optimized chunking for better performance
+        optimal_chunksize = min(
+            max(100, len(self.corpus) // (NUM_WORKERS * 4)),
+            config.LDA_CHUNKSIZE
+        )
         
         self.lda_model = LdaMulticore(
             corpus=self.corpus,
@@ -338,17 +356,21 @@ class TCLaaCPipeline:
             eta=LDA_ETA,
             random_state=self.random_state,
             passes=LDA_PASSES,
+            iterations=LDA_ITERATIONS,
             workers=NUM_WORKERS,
-            chunksize=config.LDA_CHUNKSIZE
+            chunksize=optimal_chunksize,
+            per_word_topics=False  # Disable if not needed for speed
         )
         
         elapsed = time.time() - start_time
         logger.info(f"✓ Model training complete in {elapsed:.2f}s\n")
         
-        # Display top words for each topic
+        # Display top words for each topic (compact format)
         logger.info("Top words per topic:")
         for idx, topic in self.lda_model.print_topics(num_words=5):
-            logger.info(f"  Topic {idx}: {topic}")
+            # Extract just the words for cleaner display
+            words = [word.split('*')[1].strip().strip('"') for word in topic.split(' + ')]
+            logger.info(f"  Topic {idx}: {', '.join(words)}")
         print()
     
     def assign_topics(self):
@@ -365,12 +387,14 @@ class TCLaaCPipeline:
             self.data
         )
         
-        # Show topic distribution
+        # Show topic distribution (compact format)
         topic_counts = self.df_with_topics['topic'].value_counts().sort_index()
-        logger.info("\nTopic distribution:")
+        logger.info("Topic distribution:")
         for topic_id, count in topic_counts.items():
             percentage = (count / len(self.df_with_topics)) * 100
-            logger.info(f"  Topic {topic_id}: {count} documents ({percentage:.1f}%)")
+            bar_width = int(percentage / 2)  # Visual bar
+            bar = '█' * bar_width
+            logger.info(f"  Topic {topic_id:2d}: {bar} {count:4d} docs ({percentage:5.1f}%)")
         print()
     
     def analyze_security(self):
@@ -417,8 +441,11 @@ class TCLaaCPipeline:
             )
             
             if output_path:
-                fig.write_html(output_path)
-                logger.info(f"✓ Treemap saved to: {output_path}\n")
+                # Ensure parent directory exists
+                output_path_obj = Path(output_path)
+                output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+                fig.write_html(str(output_path_obj))
+                logger.info(f"✓ Treemap saved to: {output_path_obj}\n")
             else:
                 fig.show()
                 logger.info("✓ Treemap displayed\n")
@@ -449,13 +476,16 @@ class TCLaaCPipeline:
         self.df_with_topics.to_parquet(df_path)
         logger.info(f"✓ Analysis DataFrame saved: {df_path}")
         
-        # Save topic summary
+        # Save topic summary with smart topic names
+        from graphs import generate_smart_topic_summary
         summary_path = output_path / 'topic_summary.csv'
         topic_summary = []
         for idx in range(self.num_topics):
             top_words = [word for word, _ in self.lda_model.show_topic(idx, topn=10)]
+            smart_name = generate_smart_topic_summary(idx, self.lda_model, self.df_with_topics)
             topic_summary.append({
                 'topic_id': idx,
+                'topic_name': smart_name,
                 'top_words': ', '.join(top_words),
                 'num_documents': (self.df_with_topics['topic'] == idx).sum()
             })

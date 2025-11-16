@@ -377,8 +377,7 @@ def get_topic_results_gensim(lda_model: LdaMulticore, corpus: list, df_original:
     """
     Processes and appends LDA topic assignments from a gensim model to a DataFrame.
 
-    This function displays the top words for each topic and then assigns the
-    most likely topic to each document in the original DataFrame.
+    This function assigns the most likely topic to each document in the original DataFrame.
 
     Args:
         lda_model (LdaMulticore): The trained gensim LDA model.
@@ -396,15 +395,7 @@ def get_topic_results_gensim(lda_model: LdaMulticore, corpus: list, df_original:
         ValueError: If the number of rows in `df_original` does not match the
                     number of documents in the `corpus`.
     """
-    print("\nStep 3: Displaying topics and assigning to DataFrame...")
-
-    # Part 1: Display the top words for each topic for initial inspection.
-    # The .print_topics() method provides the most probable words for each topic.
-    print("Top words for each topic:")
-    for topic_idx, topic in lda_model.print_topics(num_words=5):
-        print(f"Topic #{topic_idx}: {topic}")
-
-    # Part 2: Assign the single most likely topic to each document.
+    # Assign the single most likely topic to each document.
     topic_assignments = []
     for doc_bow in corpus:
         # get_document_topics returns a list of (topic_id, probability) tuples.
@@ -432,7 +423,6 @@ def get_topic_results_gensim(lda_model: LdaMulticore, corpus: list, df_original:
     # directly corresponds to the order of documents in the corpus and DataFrame.
     df_result['topic'] = topic_assignments
 
-    print("\nTopic assignment complete.")
     return df_result
 
 def generate_tfidf_summaries(lda_model: LatentDirichletAllocation, doc_term_matrix: np.ndarray, vectorizer, df_with_topics: pd.DataFrame, n_top_words: int = 10) -> dict:

@@ -29,6 +29,7 @@ from joblib import parallel_backend
 import numpy as np
 from gensim.corpora import Dictionary
 from gensim.models import LdaMulticore, CoherenceModel, LdaModel
+from collections import Counter
 
 def tune_lda_perplexity(doc_term_matrix: np.ndarray, min_topics: int = 5, max_topics: int = 50, step: int = 5):
     """
@@ -85,6 +86,87 @@ def tune_lda_perplexity(doc_term_matrix: np.ndarray, min_topics: int = 5, max_to
     print(f"\nBest Perplexity Score found at {best_n_topics} topics.")
 
 
+def generate_smart_topic_summary(topic_idx: int, lda_model: LdaMulticore, df_with_topics: pd.DataFrame) -> str:
+    """
+    Generates a smart, human-readable summary for a topic based on content analysis.
+    
+    Instead of just listing TF-IDF keywords, this analyzes the actual commands in the topic
+    to identify the most common executable and the primary action/purpose.
+    
+    Args:
+        topic_idx: The topic index
+        lda_model: The trained LDA model
+        df_with_topics: DataFrame with topic assignments and tokens
+        
+    Returns:
+        A descriptive string summarizing what the topic represents
+    """
+    # Get top words for context
+    topic_words = [word for word, _ in lda_model.show_topic(topic_idx, topn=10)]
+    
+    # Get documents in this topic
+    topic_docs = df_with_topics[df_with_topics['topic'] == topic_idx]
+    
+    if len(topic_docs) == 0:
+        return f"Topic {topic_idx}: Empty"
+    
+    # Analyze root commands
+    if 'root_command' in topic_docs.columns:
+        root_commands = topic_docs['root_command'].value_counts()
+        most_common_exe = root_commands.index[0] if len(root_commands) > 0 else None
+    else:
+        most_common_exe = None
+    
+    # Analyze tokens to find common patterns
+    all_tokens = []
+    for tokens in topic_docs['tokens']:
+        all_tokens.extend(tokens)
+    
+    token_counts = Counter(all_tokens)
+    
+    # Filter out the executable name itself to find action words
+    filtered_tokens = {k: v for k, v in token_counts.most_common(15) 
+                      if k not in [most_common_exe, most_common_exe.lower() if most_common_exe else None]}
+    
+    # Identify the nature of the topic based on key patterns
+    action_indicators = {
+        'network': ['http', 'url', 'download', 'web', 'net', 'tcp', 'ip', 'port'],
+        'file': ['file', 'dir', 'copy', 'move', 'delete', 'write', 'read', 'path'],
+        'registry': ['reg', 'hkey', 'hklm', 'hkcu', 'registry', 'key'],
+        'execution': ['exec', 'run', 'start', 'invoke', 'call', 'execute', 'launch'],
+        'scripting': ['script', 'powershell', 'cmd', 'batch', 'command'],
+        'admin': ['admin', 'user', 'privilege', 'elevated', 'system'],
+        'scheduled': ['task', 'schtasks', 'schedule', 'cron', 'at'],
+        'encoding': ['encode', 'decode', 'base64', 'certutil'],
+    }
+    
+    detected_category = None
+    for category, keywords in action_indicators.items():
+        if any(keyword in token for token in filtered_tokens.keys() for keyword in keywords):
+            detected_category = category
+            break
+    
+    # Build a descriptive name
+    if most_common_exe:
+        exe_name = most_common_exe.replace('.exe', '').capitalize()
+        if detected_category:
+            return f"{exe_name} {detected_category.capitalize()} Operations"
+        else:
+            # Use the most common non-exe token as descriptor
+            descriptive_tokens = [t for t in filtered_tokens.keys() 
+                                if not t.startswith('<') and len(t) > 2]
+            if descriptive_tokens:
+                descriptor = descriptive_tokens[0].capitalize()
+                return f"{exe_name} {descriptor} Activity"
+            return f"{exe_name} Commands"
+    else:
+        if detected_category:
+            return f"{detected_category.capitalize()} Operations"
+        # Fallback to top meaningful words
+        meaningful = [w for w in topic_words if not w.startswith('<') and len(w) > 2][:3]
+        return f"Topic {topic_idx}: {', '.join(meaningful).capitalize()}"
+
+
 def create_topic_treemap_gensim(df_with_topics: pd.DataFrame, lda_model: LdaMulticore, similarity_threshold: int = 40) -> go.Figure:
     """
     Generates a grouped, interactive treemap from a gensim LDA model.
@@ -115,16 +197,13 @@ def create_topic_treemap_gensim(df_with_topics: pd.DataFrame, lda_model: LdaMult
         KeyError: If the input DataFrame `df_with_topics` does not contain the
                   required 'normalized_command' column.
     """
-    print("--- Preparing data and generating treemap for gensim model ---")
+    print("Generating topic treemap visualization...")
 
-    # Part 1: Generate topic summaries directly from the gensim model.
-    # This process extracts the top keywords for each topic to create a
-    # descriptive, human-readable label.
-    # The result is a dictionary mapping topic indices to formatted strings.
-    topic_summaries = {
-        topic_idx: f"Topic {topic_idx}: " + ", ".join([word.split('*')[1].strip().strip('"') for word in topic.split(' + ')])
-        for topic_idx, topic in lda_model.print_topics(num_words=4)
-    }
+    # Part 1: Generate smart topic summaries based on content analysis
+    topic_summaries = {}
+    for topic_idx in range(lda_model.num_topics):
+        topic_summaries[topic_idx] = generate_smart_topic_summary(topic_idx, lda_model, df_with_topics)
+    
     # Add a summary for documents that were not strongly assigned to any topic.
     topic_summaries[-1] = "Unassigned"
 

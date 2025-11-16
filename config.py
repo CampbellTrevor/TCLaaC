@@ -22,7 +22,7 @@ RANDOM_STATE = 42
 LDA_ALPHA = 'asymmetric'  # Document-topic prior
 LDA_ETA = 1  # Topic-word prior
 LDA_PASSES = 10  # Number of passes through the corpus during training
-LDA_ITERATIONS = 50  # Maximum number of iterations through the corpus
+LDA_ITERATIONS = 100  # Maximum number of iterations through the corpus
 LDA_CHUNKSIZE = 2000  # Number of documents to process in each batch
 
 # Minimum number of tokens required for a document to be included

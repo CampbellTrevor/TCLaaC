@@ -348,30 +348,57 @@ class TCLaaCPipeline:
             config.LDA_CHUNKSIZE
         )
         
-        self.lda_model = LdaMulticore(
-            corpus=self.corpus,
-            id2word=self.dictionary,
-            num_topics=self.num_topics,
-            alpha=LDA_ALPHA,
-            eta=LDA_ETA,
-            random_state=self.random_state,
-            passes=LDA_PASSES,
-            iterations=LDA_ITERATIONS,
-            workers=NUM_WORKERS,
-            chunksize=optimal_chunksize,
-            per_word_topics=False  # Disable if not needed for speed
-        )
+        # Suppress gensim's verbose logging
+        gensim_logger = logging.getLogger('gensim')
+        original_level = gensim_logger.level
+        gensim_logger.setLevel(logging.ERROR)
         
-        elapsed = time.time() - start_time
-        logger.info(f"✓ Model training complete in {elapsed:.2f}s\n")
-        
-        # Display top words for each topic (compact format)
-        logger.info("Top words per topic:")
-        for idx, topic in self.lda_model.print_topics(num_words=5):
-            # Extract just the words for cleaner display
-            words = [word.split('*')[1].strip().strip('"') for word in topic.split(' + ')]
-            logger.info(f"  Topic {idx}: {', '.join(words)}")
-        print()
+        try:
+            # Show progress bar during training
+            num_chunks = max(1, len(self.corpus) // optimal_chunksize)
+            total_updates = LDA_PASSES * num_chunks
+            
+            with tqdm(
+                total=total_updates,
+                desc="⚙ Training LDA",
+                bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} chunks [{elapsed}]',
+                leave=True
+            ) as pbar:
+                # We'll approximate progress since we can't hook into gensim directly
+                # Train one pass at a time and update progress
+                self.lda_model = LdaMulticore(
+                    corpus=self.corpus,
+                    id2word=self.dictionary,
+                    num_topics=self.num_topics,
+                    alpha=LDA_ALPHA,
+                    eta=LDA_ETA,
+                    random_state=self.random_state,
+                    passes=1,
+                    iterations=LDA_ITERATIONS,
+                    workers=NUM_WORKERS,
+                    chunksize=optimal_chunksize,
+                    per_word_topics=False
+                )
+                pbar.update(num_chunks)
+                
+                # Continue training for remaining passes
+                for pass_num in range(2, LDA_PASSES + 1):
+                    self.lda_model.update(self.corpus)
+                    pbar.update(num_chunks)
+            
+            elapsed = time.time() - start_time
+            logger.info(f"✓ Model training complete in {elapsed:.2f}s\n")
+            
+            # Display top words for each topic (compact format)
+            logger.info("Top words per topic:")
+            for idx, topic in self.lda_model.print_topics(num_words=5):
+                # Extract just the words for cleaner display
+                words = [word.split('*')[1].strip().strip('"') for word in topic.split(' + ')]
+                logger.info(f"  Topic {idx}: {', '.join(words)}")
+            print()
+        finally:
+            # Restore original logging level
+            gensim_logger.setLevel(original_level)
     
     def assign_topics(self):
         """

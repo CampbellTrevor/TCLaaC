@@ -287,3 +287,191 @@ def create_topic_treemap_gensim(df_with_topics: pd.DataFrame, lda_model: LdaMult
     fig.update_layout(margin=dict(t=50, l=25, r=25, b=25), font=dict(size=14))
 
     return fig
+
+
+def create_topic_heatmap(df_with_topics: pd.DataFrame, lda_model: LdaMulticore) -> go.Figure:
+    """
+    Creates an interactive heatmap showing the distribution of top words across topics.
+    
+    Args:
+        df_with_topics: DataFrame with topic assignments
+        lda_model: Trained LDA model
+        
+    Returns:
+        Plotly Figure object
+    """
+    # Get top words for each topic
+    num_topics = lda_model.num_topics
+    top_n = 15
+    
+    # Build matrix of word probabilities across topics
+    topic_words = {}
+    all_words = set()
+    
+    for topic_idx in range(num_topics):
+        words_probs = lda_model.show_topic(topic_idx, topn=top_n)
+        topic_words[topic_idx] = {word: prob for word, prob in words_probs}
+        all_words.update([word for word, _ in words_probs])
+    
+    # Create matrix
+    words_list = sorted(list(all_words))
+    matrix = []
+    for word in words_list:
+        row = [topic_words[topic_idx].get(word, 0) for topic_idx in range(num_topics)]
+        matrix.append(row)
+    
+    # Create heatmap
+    fig = go.Figure(data=go.Heatmap(
+        z=matrix,
+        x=[f'Topic {i}' for i in range(num_topics)],
+        y=words_list,
+        colorscale='Viridis',
+        hoverongaps=False
+    ))
+    
+    fig.update_layout(
+        title='Topic-Word Distribution Heatmap',
+        xaxis_title='Topics',
+        yaxis_title='Words',
+        height=max(600, len(words_list) * 20)
+    )
+    
+    return fig
+
+
+def create_security_score_chart(topic_scores: pd.DataFrame, df_with_topics: pd.DataFrame, lda_model: LdaMulticore) -> go.Figure:
+    """
+    Creates a bar chart showing security scores (LOLBAS density) for each topic.
+    
+    Args:
+        topic_scores: DataFrame with security scores per topic
+        df_with_topics: DataFrame with topic assignments
+        lda_model: Trained LDA model
+        
+    Returns:
+        Plotly Figure object
+    """
+    from graphs import generate_smart_topic_summary
+    
+    # Get topic names
+    topic_names = []
+    lolbas_density = []
+    doc_counts = []
+    
+    for topic_id in topic_scores.index:
+        topic_name = generate_smart_topic_summary(topic_id, lda_model, df_with_topics)
+        topic_names.append(f"T{topic_id}: {topic_name}")
+        lolbas_density.append(topic_scores.loc[topic_id, 'lolbas_density'])
+        doc_counts.append(topic_scores.loc[topic_id, 'total_count'])
+    
+    # Create bar chart
+    fig = go.Figure(data=[
+        go.Bar(
+            x=topic_names,
+            y=lolbas_density,
+            marker=dict(
+                color=lolbas_density,
+                colorscale='Reds',
+                showscale=True,
+                colorbar=dict(title="LOLBAS<br>Density")
+            ),
+            text=[f"{d:.1f}%<br>({int(c)} docs)" for d, c in zip(lolbas_density, doc_counts)],
+            textposition='outside',
+            hovertemplate='<b>%{x}</b><br>LOLBAS Density: %{y:.2f}%<extra></extra>'
+        )
+    ])
+    
+    fig.update_layout(
+        title='Topic Security Risk Score (LOLBAS Density)',
+        xaxis_title='Topics',
+        yaxis_title='LOLBAS Density (%)',
+        height=500,
+        showlegend=False,
+        xaxis={'tickangle': -45}
+    )
+    
+    return fig
+
+
+def create_topic_distribution_chart(df_with_topics: pd.DataFrame, lda_model: LdaMulticore) -> go.Figure:
+    """
+    Creates an interactive sunburst chart showing topic distribution.
+    
+    Args:
+        df_with_topics: DataFrame with topic assignments
+        lda_model: Trained LDA model
+        
+    Returns:
+        Plotly Figure object
+    """
+    from graphs import generate_smart_topic_summary
+    
+    # Count documents per topic
+    topic_counts = df_with_topics['topic'].value_counts().sort_index()
+    
+    # Prepare data
+    labels = []
+    parents = []
+    values = []
+    
+    # Root
+    labels.append("All Commands")
+    parents.append("")
+    values.append(len(df_with_topics))
+    
+    # Topics
+    for topic_id, count in topic_counts.items():
+        topic_name = generate_smart_topic_summary(topic_id, lda_model, df_with_topics)
+        labels.append(f"Topic {topic_id}: {topic_name}")
+        parents.append("All Commands")
+        values.append(count)
+    
+    fig = go.Figure(go.Sunburst(
+        labels=labels,
+        parents=parents,
+        values=values,
+        branchvalues="total",
+        hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percentRoot:.1%}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title='Topic Distribution Sunburst',
+        height=600
+    )
+    
+    return fig
+
+
+def create_command_length_distribution(df_with_topics: pd.DataFrame) -> go.Figure:
+    """
+    Creates a box plot showing command length distribution by topic.
+    
+    Args:
+        df_with_topics: DataFrame with topic assignments and tokens
+        
+    Returns:
+        Plotly Figure object
+    """
+    # Calculate command lengths
+    df_plot = df_with_topics.copy()
+    df_plot['token_count'] = df_plot['tokens'].apply(len)
+    
+    fig = go.Figure()
+    
+    for topic_id in sorted(df_plot['topic'].unique()):
+        topic_data = df_plot[df_plot['topic'] == topic_id]['token_count']
+        fig.add_trace(go.Box(
+            y=topic_data,
+            name=f'Topic {topic_id}',
+            boxmean='sd'
+        ))
+    
+    fig.update_layout(
+        title='Command Length Distribution by Topic',
+        xaxis_title='Topic',
+        yaxis_title='Number of Tokens',
+        height=500,
+        showlegend=True
+    )
+    
+    return fig

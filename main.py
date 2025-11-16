@@ -426,7 +426,7 @@ class TCLaaCPipeline:
     
     def analyze_security(self):
         """
-        Analyze topics for potential security concerns using LOLBAS keywords.
+        Analyze topics for potential security concerns using LOLBAS density metrics.
         """
         logger.info("=" * 70)
         logger.info("STEP 8: SECURITY ANALYSIS")
@@ -434,15 +434,15 @@ class TCLaaCPipeline:
         
         if not os.path.exists(LOLBAS_REPO_PATH):
             logger.warning("LOLBAS repository not found, skipping security analysis")
-            return
+            return None
         
         try:
             lolbas_keywords = generate_keywords_from_lolbas(LOLBAS_REPO_PATH)
-            logger.info(f"Analyzing with {len(lolbas_keywords)} LOLBAS keywords...")
             
             topic_scores = analyze_malicious_topics(self.df_with_topics, lolbas_keywords)
             
             logger.info("\n✓ Security analysis complete\n")
+            self.topic_scores = topic_scores  # Store for visualization
             return topic_scores
         except Exception as e:
             logger.error(f"Error during security analysis: {e}")
@@ -478,6 +478,64 @@ class TCLaaCPipeline:
                 logger.info("✓ Treemap displayed\n")
         except Exception as e:
             logger.error(f"Error during visualization: {e}")
+    
+    def create_analysis_visualizations(self, output_dir: str = '.'):
+        """
+        Generate comprehensive analysis visualizations for data exploration.
+        
+        Args:
+            output_dir: Directory to save visualization files
+        """
+        logger.info("=" * 70)
+        logger.info("CREATING ANALYSIS VISUALIZATIONS")
+        logger.info("=" * 70)
+        
+        from graphs import (
+            create_topic_heatmap, 
+            create_security_score_chart,
+            create_topic_distribution_chart,
+            create_command_length_distribution
+        )
+        
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # 1. Topic-Word Heatmap
+            logger.info("Generating topic-word heatmap...")
+            fig = create_topic_heatmap(self.df_with_topics, self.lda_model)
+            heatmap_path = output_path / 'topic_word_heatmap.html'
+            fig.write_html(str(heatmap_path))
+            logger.info(f"✓ Heatmap saved to: {heatmap_path}")
+            
+            # 2. Security Score Chart (if analysis was performed)
+            if hasattr(self, 'topic_scores') and self.topic_scores is not None:
+                logger.info("Generating security risk chart...")
+                fig = create_security_score_chart(self.topic_scores, self.df_with_topics, self.lda_model)
+                security_path = output_path / 'security_risk_chart.html'
+                fig.write_html(str(security_path))
+                logger.info(f"✓ Security chart saved to: {security_path}")
+            
+            # 3. Topic Distribution Sunburst
+            logger.info("Generating topic distribution sunburst...")
+            fig = create_topic_distribution_chart(self.df_with_topics, self.lda_model)
+            sunburst_path = output_path / 'topic_distribution_sunburst.html'
+            fig.write_html(str(sunburst_path))
+            logger.info(f"✓ Sunburst saved to: {sunburst_path}")
+            
+            # 4. Command Length Distribution
+            logger.info("Generating command length distribution...")
+            fig = create_command_length_distribution(self.df_with_topics)
+            length_path = output_path / 'command_length_boxplot.html'
+            fig.write_html(str(length_path))
+            logger.info(f"✓ Box plot saved to: {length_path}")
+            
+            logger.info(f"\n✓ All visualizations created in: {output_path}\n")
+            
+        except Exception as e:
+            logger.error(f"Error creating visualizations: {e}")
+            import traceback
+            traceback.print_exc()
     
     def save_results(self, output_dir: str = '.'):
         """
@@ -558,6 +616,8 @@ class TCLaaCPipeline:
             if visualize:
                 viz_path = Path(output_dir) / 'topic_treemap.html'
                 self.visualize(str(viz_path))
+                # Generate comprehensive analysis visualizations
+                self.create_analysis_visualizations(output_dir)
             
             self.save_results(output_dir)
             

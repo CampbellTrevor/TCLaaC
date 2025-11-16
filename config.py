@@ -201,9 +201,8 @@ def validate_config():
         raise ValueError("TUNING_MIN_TOPICS must be less than TUNING_MAX_TOPICS")
     
     if not os.path.exists(LOLBAS_REPO_PATH):
-        print(f"Warning: LOLBAS repository not found at {LOLBAS_REPO_PATH}")
-    
-    print("✓ Configuration validated successfully")
+        import logging
+        logging.getLogger(__name__).debug(f"LOLBAS repository not found at {LOLBAS_REPO_PATH}")
 
 # Run validation on import
 if __name__ != '__main__':

@@ -12,12 +12,27 @@ This project applies topic modeling to command-line data extracted from Sysmon l
 
 ## Features
 
-- **Advanced Text Preprocessing**: Normalization rules for GUIDs, IPs, hex strings, dates, and more
-- **Optimized Tokenization**: Custom regex-based tokenizer for command-line syntax
+### NLP & Topic Modeling
+- **Enhanced Text Preprocessing**: Comprehensive normalization for URLs, emails, registry keys, UNC paths, domains, GUIDs, IPs, hex strings, dates, timestamps, and file paths
+- **Optimized Tokenization**: Custom regex-based tokenizer for command-line syntax with edge case handling
 - **Parallel Processing**: Multi-core support for fast processing of millions of logs
 - **Hyperparameter Tuning**: Automated LDA optimization using coherence scores
-- **Interactive Visualization**: Treemaps and topic explorers for result analysis
-- **LOLBAS Integration**: Enrichment with known dual-use binaries for security analysis
+- **Command Complexity Analysis**: Multi-factor scoring for obfuscation detection
+
+### Security Analysis
+- **LOLBAS Integration**: Enrichment with known dual-use binaries and density-based risk scoring
+- **MITRE ATT&CK Mapping**: Automatic technique identification across 9 attack categories
+- **Comprehensive Risk Scoring**: Weighted formula combining LOLBAS density, MITRE coverage, complexity, and binary diversity
+- **Behavioral Pattern Detection**: Multi-dimensional security analysis per topic
+
+### Visualization & Reporting
+- **Comprehensive Index Dashboard**: Main entry point showcasing all analysis results with summary statistics
+- **Interactive Analysis Dashboard**: Multi-tab SPA with 5 visualization types
+- **Topic Treemaps**: Hierarchical command grouping with fuzzy matching
+- **Security Risk Charts**: LOLBAS density and risk score visualization
+- **Word Heatmaps**: Topic-word distribution analysis
+- **Distribution Sunbursts**: Proportional topic representation
+- **Complexity Box Plots**: Command length distribution by topic
 
 ## Project Structure
 
@@ -62,11 +77,22 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### Option 1: Using the Streamlined Pipeline (main.py)
+### Option 1: Using the Streamlined Pipeline (main.py) - Recommended
+
+Generate a comprehensive analysis with all features:
 
 ```bash
-python main.py --input data.csv --output results/ --topics 11
+# Analyze with synthetic data (for testing)
+python main.py --synthetic 1000 --output results/
+
+# Analyze your own CSV data
+python main.py --input your_data.csv --output results/ --topics 11
+
+# Quick analysis without tuning
+python main.py --input data.csv --no-tune --output results/
 ```
+
+After running, open `results/index.html` in your browser to view the comprehensive analysis dashboard.
 
 ### Option 2: Using the Jupyter Notebook
 
@@ -136,12 +162,72 @@ Edit `config.py` to customize:
 
 ## Output Files
 
-- `lda_model.joblib`: Trained LDA model (reusable)
-- `analysis_dataframe.parquet`: Full results with topic assignments
-- `topic_treemap.html`: Interactive visualization (if enabled)
-- `topic_summary.csv`: Topic keywords and statistics
+The pipeline generates a comprehensive set of outputs:
+
+### Main Deliverables
+- **`index.html`**: 🌟 **Main Dashboard** - Comprehensive entry point with:
+  - Summary statistics cards
+  - High-risk topic analysis
+  - Links to all visualizations
+  - Methodology documentation
+  - Key insights
+- **`analysis_dashboard.html`**: Interactive SPA with 5 visualization tabs:
+  - Topic Treemap (with LOLBAS filtering)
+  - Word Heatmap
+  - Security Risk Chart
+  - Distribution Sunburst
+  - Complexity Analysis
+
+### Data Files
+- **`lda_model.joblib`**: Trained LDA model (reusable)
+- **`analysis_dataframe.parquet`**: Full results with topic assignments, MITRE techniques, complexity scores
+- **`topic_summary.csv`**: Smart topic names, keywords, and document counts
+
+### How to Use
+1. Run the pipeline: `python main.py --synthetic 1000 --output results/`
+2. Open `results/index.html` in your browser
+3. Explore interactive visualizations
+4. Download data files for further analysis
 
 ## Advanced Usage
+
+### Security Analysis Features
+
+#### MITRE ATT&CK Technique Mapping
+
+Commands are automatically mapped to MITRE ATT&CK techniques:
+- **T1059**: Command and Scripting Interpreter (PowerShell, CMD, etc.)
+- **T1053**: Scheduled Task/Job (schtasks, at.exe)
+- **T1105**: Ingress Tool Transfer (certutil, bitsadmin downloads)
+- **T1218**: System Binary Proxy Execution (rundll32, regsvr32)
+- **T1547**: Boot or Logon Autostart (registry Run keys)
+- **T1003**: Credential Dumping (lsass, mimikatz)
+- **T1055**: Process Injection
+- **T1027**: Obfuscated Files or Information (base64, encoding)
+
+#### Comprehensive Risk Scoring
+
+Each topic receives a risk score calculated as:
+```
+Risk Score = (LOLBAS Density × 0.4) + 
+             (MITRE Coverage × 10 × 0.3) + 
+             (Avg Complexity × 0.15) + 
+             (Unique Binaries × 2 × 0.15)
+```
+
+Where:
+- **LOLBAS Density**: Weighted metric of LOLBAS binary usage
+- **MITRE Coverage**: Number of unique ATT&CK techniques
+- **Avg Complexity**: Command obfuscation/complexity score
+- **Unique Binaries**: Diversity of executables in the topic
+
+#### Command Complexity Scoring
+
+Commands are scored (0-100) based on:
+- Length and structure
+- Special character usage
+- Obfuscation indicators (base64, encode, hidden, bypass)
+- Command chaining (pipes, redirects, &&)
 
 ### Custom Normalization Rules
 
@@ -159,12 +245,13 @@ NORMALIZATION_RULES_COMPILED = {
 ### Hyperparameter Tuning
 
 ```python
-from main import tune_hyperparameters
-best_params = tune_hyperparameters(
-    corpus=corpus,
-    dictionary=dictionary,
-    num_topics_range=(5, 50, 2)
-)
+from main import TCLaaCPipeline
+pipeline = TCLaaCPipeline(num_topics=11)
+pipeline.load_data('data.csv')
+pipeline.preprocess()
+pipeline.prepare_corpus()
+pipeline.tune_hyperparameters()  # Finds optimal topic count
+pipeline.train_model()
 ```
 
 ## LOLBAS Data

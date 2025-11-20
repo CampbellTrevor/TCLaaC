@@ -5,6 +5,7 @@ Latent Dirichlet Allocation (LDA) models and visualizing their results.
 This module provides functions to:
 - Tune the number of topics for an LDA model using perplexity scores.
 - Generate interactive treemaps to visualize topic and command distributions.
+- Create network visualizations for command relationships and MITRE techniques.
 
 It relies on libraries such as pandas, plotly, matplotlib, scikit-learn,
 and gensim for data manipulation, visualization, and topic modeling.
@@ -30,6 +31,11 @@ import numpy as np
 from gensim.corpora import Dictionary
 from gensim.models import LdaMulticore, CoherenceModel, LdaModel
 from collections import Counter
+from network_viz import (
+    create_command_network, 
+    create_topic_relationship_network,
+    create_mitre_attack_network
+)
 
 def tune_lda_perplexity(doc_term_matrix: np.ndarray, min_topics: int = 5, max_topics: int = 50, step: int = 5):
     """
@@ -511,6 +517,11 @@ def create_comprehensive_index(
     sunburst_fig = create_topic_distribution_chart(df_with_topics, lda_model)
     length_fig = create_command_length_distribution(df_with_topics)
     
+    # Network visualizations
+    command_network_fig = create_command_network(df_with_topics, min_edge_weight=2, max_nodes=30)
+    topic_network_fig = create_topic_relationship_network(df_with_topics, lda_model)
+    mitre_network_fig = create_mitre_attack_network(df_with_topics)
+    
     security_fig = None
     if topic_scores is not None:
         security_fig = create_security_score_chart(topic_scores, df_with_topics, lda_model)
@@ -541,6 +552,11 @@ def create_comprehensive_index(
                 'lolbas_count': int(row['lolbas_count']),
                 'doc_count': int(row['total_count'])
             })
+    
+    # Save individual network visualizations
+    command_network_fig.write_html(str(output_path / 'command_network.html'))
+    topic_network_fig.write_html(str(output_path / 'topic_network.html'))
+    mitre_network_fig.write_html(str(output_path / 'mitre_network.html'))
     
     # Create comprehensive index.html
     index_html = f"""<!DOCTYPE html>
@@ -732,6 +748,21 @@ def create_comprehensive_index(
             transition: all 0.3s;
             text-decoration: none;
             display: inline-block;
+        }}
+        
+        .btn-sm {{
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            margin-top: 10px;
             text-align: center;
         }}
         
@@ -987,6 +1018,27 @@ def create_comprehensive_index(
                     <div class="icon">📏</div>
                     <h3>Complexity Analysis</h3>
                     <p>Command length and complexity distribution by topic to identify obfuscation patterns.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="icon">🕸️</div>
+                    <h3>Command Network</h3>
+                    <p>Network graph showing co-occurrence patterns between commands within topics.</p>
+                    <a href="command_network.html" class="btn-sm">View Network →</a>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="icon">🔗</div>
+                    <h3>Topic Relationships</h3>
+                    <p>Network visualization of topic similarities and connections based on shared vocabulary.</p>
+                    <a href="topic_network.html" class="btn-sm">View Network →</a>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="icon">🎯</div>
+                    <h3>MITRE ATT&CK Network</h3>
+                    <p>Co-occurrence network of MITRE ATT&CK techniques found in command patterns.</p>
+                    <a href="mitre_network.html" class="btn-sm">View Network →</a>
                 </div>
                 
                 <div class="feature-card">

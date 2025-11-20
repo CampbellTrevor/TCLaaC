@@ -44,6 +44,9 @@ from helpers import (
     NORMALIZATION_RULES_COMPILED
 )
 from graphs import create_topic_treemap_gensim
+from cache_manager import get_cache_manager
+from quality_checker import DataQualityChecker
+from anomaly_detector import AnomalyDetector
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -66,23 +69,28 @@ class TCLaaCPipeline:
     Main pipeline class for command-line analysis using LDA topic modeling.
     """
     
-    def __init__(self, num_topics: int = NUM_TOPICS, random_state: int = RANDOM_STATE):
+    def __init__(self, num_topics: int = NUM_TOPICS, random_state: int = RANDOM_STATE, use_cache: bool = True):
         """
         Initialize the pipeline with configuration.
         
         Args:
             num_topics: Number of topics for LDA model
             random_state: Random seed for reproducibility
+            use_cache: Whether to use caching for expensive operations
         """
         self.num_topics = num_topics
         self.random_state = random_state
+        self.use_cache = use_cache
         self.data = None
         self.dictionary = None
         self.corpus = None
         self.lda_model = None
         self.df_with_topics = None
+        self.cache_manager = get_cache_manager() if use_cache else None
+        self.quality_checker = DataQualityChecker()
+        self.anomaly_detector = AnomalyDetector()
         
-        logger.info(f"Initialized TCLaaC Pipeline (topics={num_topics}, seed={random_state})")
+        logger.info(f"Initialized TCLaaC Pipeline (topics={num_topics}, seed={random_state}, cache={use_cache})")
     
     def load_data(self, source: str, is_synthetic: bool = False, limit: Optional[int] = None):
         """
@@ -111,7 +119,13 @@ class TCLaaCPipeline:
             self.data = self.data.sample(n=limit, random_state=self.random_state)
         
         validate_dataframe(self.data)
-        logger.info(f"✓ Loaded {len(self.data)} command lines\n")
+        logger.info(f"✓ Loaded {len(self.data)} command lines")
+        
+        # Run data quality checks
+        is_valid, checks, warnings, errors = self.quality_checker.run_all_checks(self.data)
+        if not is_valid:
+            logger.error("Data quality issues detected. Proceeding with caution...")
+        logger.info("")
     
     def enrich_with_lolbas(self):
         """
@@ -127,7 +141,21 @@ class TCLaaCPipeline:
             return
         
         try:
-            lolbas_commands = get_all_lolbas_commands(LOLBAS_REPO_PATH)
+            # Try to load from cache
+            lolbas_commands = None
+            if self.cache_manager:
+                cache_key = {'path': LOLBAS_REPO_PATH}
+                lolbas_commands = self.cache_manager.get('lolbas', cache_key)
+                if lolbas_commands:
+                    logger.info("Loaded LOLBAS data from cache")
+            
+            # Load from filesystem if not cached
+            if lolbas_commands is None:
+                lolbas_commands = get_all_lolbas_commands(LOLBAS_REPO_PATH)
+                # Cache for future use
+                if self.cache_manager:
+                    self.cache_manager.set('lolbas', cache_key, lolbas_commands)
+            
             logger.info(f"Extracted {len(lolbas_commands)} LOLBAS commands")
             
             lolbas_df = pd.DataFrame({'command_line': lolbas_commands})
@@ -448,6 +476,33 @@ class TCLaaCPipeline:
             logger.error(f"Error during security analysis: {e}")
             return None
     
+    def detect_anomalies(self):
+        """
+        Perform advanced anomaly detection on analyzed data.
+        """
+        logger.info("=" * 70)
+        logger.info("STEP 9: ANOMALY DETECTION")
+        logger.info("=" * 70)
+        
+        try:
+            # Run full anomaly detection suite
+            self.df_with_topics = self.anomaly_detector.run_full_detection(
+                self.df_with_topics
+            )
+            
+            # Get top anomalies
+            if 'ensemble_anomaly_score' in self.df_with_topics.columns:
+                top_anomalies = self.df_with_topics.nlargest(5, 'ensemble_anomaly_score')
+                logger.info("\nTop 5 Anomalous Commands:")
+                for idx, row in top_anomalies.iterrows():
+                    logger.info(f"  Score: {row['ensemble_anomaly_score']:.3f} - {row['command_line'][:80]}...")
+            
+            logger.info("\n✓ Anomaly detection complete\n")
+        except Exception as e:
+            logger.error(f"Error during anomaly detection: {e}")
+            import traceback
+            traceback.print_exc()
+    
     def visualize(self, output_path: Optional[str] = None):
         """
         Generate interactive treemap visualization.
@@ -456,7 +511,7 @@ class TCLaaCPipeline:
             output_path: Path to save HTML visualization
         """
         logger.info("=" * 70)
-        logger.info("STEP 9: VISUALIZATION")
+        logger.info("STEP 10: VISUALIZATION")
         logger.info("=" * 70)
         
         try:
@@ -533,7 +588,7 @@ class TCLaaCPipeline:
             output_dir: Directory to save output files
         """
         logger.info("=" * 70)
-        logger.info("STEP 10: SAVING RESULTS")
+        logger.info("STEP 11: SAVING RESULTS")
         logger.info("=" * 70)
         
         output_path = Path(output_dir)
@@ -600,6 +655,7 @@ class TCLaaCPipeline:
             self.train_model()
             self.assign_topics()
             self.analyze_security()
+            self.detect_anomalies()
             
             self.save_results(output_dir)
             

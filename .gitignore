@@ -58,3 +58,6 @@ sample_*.csv
 *.joblib
 *.parquet
 *.pkl
+
+# Cache directory
+.tclaaс_cache/

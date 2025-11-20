@@ -511,6 +511,69 @@ def generate_tfidf_summaries(lda_model: LatentDirichletAllocation, doc_term_matr
 
     return summaries
 
+def map_mitre_attack_techniques(command: str, mitre_patterns: dict = None) -> list:
+    """
+    Maps a command to MITRE ATT&CK techniques based on pattern matching.
+    
+    Args:
+        command: Command line string
+        mitre_patterns: Dictionary of technique IDs to keyword patterns
+        
+    Returns:
+        List of MITRE ATT&CK technique IDs that match the command
+    """
+    if mitre_patterns is None:
+        # Import here to avoid circular dependency
+        try:
+            from config import MITRE_ATTACK_PATTERNS
+            mitre_patterns = MITRE_ATTACK_PATTERNS
+        except ImportError:
+            return []
+    
+    command_lower = command.lower()
+    matched_techniques = []
+    
+    for technique_id, keywords in mitre_patterns.items():
+        if any(keyword.lower() in command_lower for keyword in keywords):
+            matched_techniques.append(technique_id)
+    
+    return matched_techniques
+
+
+def calculate_command_complexity(command: str) -> float:
+    """
+    Calculates a complexity score for a command based on multiple factors.
+    
+    Args:
+        command: Command line string
+        
+    Returns:
+        Complexity score (0-100)
+    """
+    score = 0.0
+    
+    # Factor 1: Command length (max 20 points)
+    length_score = min(len(command) / 10, 20)
+    score += length_score
+    
+    # Factor 2: Number of special characters (max 20 points)
+    special_chars = sum(1 for c in command if c in '|&;<>(){}[]$`\'"')
+    special_score = min(special_chars * 2, 20)
+    score += special_score
+    
+    # Factor 3: Obfuscation indicators (max 30 points)
+    obfuscation_keywords = ['base64', 'encode', 'hidden', 'bypass', 'noprofile']
+    obfuscation_score = sum(10 for kw in obfuscation_keywords if kw.lower() in command.lower())
+    score += min(obfuscation_score, 30)
+    
+    # Factor 4: Nesting level (pipes, redirects) (max 30 points)
+    nesting_chars = command.count('|') + command.count('&&') + command.count(';')
+    nesting_score = min(nesting_chars * 10, 30)
+    score += nesting_score
+    
+    return min(score, 100)
+
+
 def analyze_malicious_topics(df_with_topics: pd.DataFrame, suspicious_keywords: list) -> pd.DataFrame:
     """
     Scores topics based on LOLBAS density and command patterns.
@@ -551,6 +614,21 @@ def analyze_malicious_topics(df_with_topics: pd.DataFrame, suspicious_keywords: 
     # Count LOLBAS matches per command
     df_with_topics['lolbas_count'] = df_with_topics['command_line'].str.findall(pattern).apply(len)
 
+    # Add MITRE ATT&CK technique mapping
+    try:
+        from config import MITRE_ATTACK_PATTERNS
+        df_with_topics['mitre_techniques'] = df_with_topics['command_line'].apply(
+            lambda cmd: map_mitre_attack_techniques(cmd, MITRE_ATTACK_PATTERNS)
+        )
+        df_with_topics['mitre_count'] = df_with_topics['mitre_techniques'].apply(len)
+        has_mitre = True
+    except Exception as e:
+        logger.warning(f"Could not map MITRE ATT&CK techniques: {e}")
+        has_mitre = False
+    
+    # Add command complexity scoring
+    df_with_topics['complexity_score'] = df_with_topics['command_line'].apply(calculate_command_complexity)
+    
     # Step 2: Calculate comprehensive metrics per topic
     topic_metrics = []
     
@@ -576,6 +654,29 @@ def analyze_malicious_topics(df_with_topics: pd.DataFrame, suspicious_keywords: 
         # This balances prevalence, diversity, and intensity of LOLBAS usage
         lolbas_density = (lolbas_percentage * 0.5) + (unique_lolbas * 5) + (avg_lolbas_per_doc * 10)
         
+        # Calculate MITRE ATT&CK coverage
+        if has_mitre:
+            mitre_docs = (topic_data['mitre_count'] > 0).sum()
+            mitre_percentage = (mitre_docs / total_docs) * 100 if total_docs > 0 else 0
+            unique_techniques = set()
+            for techniques in topic_data['mitre_techniques']:
+                unique_techniques.update(techniques)
+            mitre_coverage = len(unique_techniques)
+        else:
+            mitre_percentage = 0
+            mitre_coverage = 0
+        
+        # Calculate average complexity
+        avg_complexity = topic_data['complexity_score'].mean()
+        
+        # Calculate comprehensive risk score
+        risk_score = (
+            lolbas_density * 0.4 +
+            mitre_coverage * 10 * 0.3 +
+            avg_complexity * 0.15 +
+            unique_lolbas * 2 * 0.15
+        )
+        
         topic_metrics.append({
             'topic': topic_id,
             'total_count': total_docs,
@@ -583,23 +684,33 @@ def analyze_malicious_topics(df_with_topics: pd.DataFrame, suspicious_keywords: 
             'lolbas_percentage': lolbas_percentage,
             'unique_lolbas': unique_lolbas,
             'avg_lolbas_per_doc': avg_lolbas_per_doc,
-            'lolbas_density': lolbas_density
+            'lolbas_density': lolbas_density,
+            'mitre_technique_count': mitre_coverage if has_mitre else 0,
+            'mitre_percentage': mitre_percentage if has_mitre else 0,
+            'avg_complexity': avg_complexity,
+            'risk_score': risk_score
         })
     
     topic_scores = pd.DataFrame(topic_metrics).set_index('topic')
-    topic_scores = topic_scores.sort_values(by='lolbas_density', ascending=False)
+    topic_scores = topic_scores.sort_values(by='risk_score', ascending=False)
 
     # Step 3: Extract the specific binaries matched in each topic
     lolbas_df = df_with_topics[df_with_topics['contains_lolbas']].copy()
     lolbas_df['matched_lolbas'] = lolbas_df['command_line'].str.findall(pattern)
     
     # Step 4: Display summary of most suspicious topics
-    logger.info("\n=== Top 5 Highest Risk Topics (by LOLBAS Density) ===")
+    logger.info("\n=== Top 5 Highest Risk Topics (by Comprehensive Risk Score) ===")
     for topic_id, row in topic_scores.head(5).iterrows():
-        logger.info(f"\n🔴 Topic #{topic_id} | Risk Score: {row['lolbas_density']:.2f}")
+        logger.info(f"\n🔴 Topic #{topic_id} | Overall Risk Score: {row['risk_score']:.2f}")
         logger.info(f"   LOLBAS Coverage: {row['lolbas_percentage']:.1f}% ({int(row['lolbas_count'])} of {int(row['total_count'])} docs)")
-        logger.info(f"   Unique Binaries: {row['unique_lolbas']}")
-        logger.info(f"   Avg per Document: {row['avg_lolbas_per_doc']:.2f}")
+        logger.info(f"   LOLBAS Density: {row['lolbas_density']:.2f}")
+        logger.info(f"   Unique LOLBAS Binaries: {row['unique_lolbas']}")
+        
+        if has_mitre:
+            logger.info(f"   MITRE ATT&CK Techniques: {int(row['mitre_technique_count'])} unique")
+            logger.info(f"   MITRE Coverage: {row['mitre_percentage']:.1f}% of docs")
+        
+        logger.info(f"   Avg Complexity Score: {row['avg_complexity']:.1f}/100")
         
         # Show most common LOLBAS binaries in this topic
         topic_lolbas = lolbas_df[lolbas_df['topic'] == topic_id]
@@ -610,6 +721,14 @@ def analyze_malicious_topics(df_with_topics: pd.DataFrame, suspicious_keywords: 
             logger.info("   Top LOLBAS Binaries:")
             for binary, count in top_binaries:
                 logger.info(f"     • {binary}: {count}x")
+        
+        # Show MITRE techniques if available
+        if has_mitre:
+            topic_techniques = set()
+            for techniques in df_with_topics[df_with_topics['topic'] == topic_id]['mitre_techniques']:
+                topic_techniques.update(techniques)
+            if topic_techniques:
+                logger.info(f"   MITRE ATT&CK Techniques: {', '.join(sorted(topic_techniques))}")
     
     return topic_scores
 

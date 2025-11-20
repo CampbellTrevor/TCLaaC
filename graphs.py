@@ -477,6 +477,612 @@ def create_command_length_distribution(df_with_topics: pd.DataFrame) -> go.Figur
     return fig
 
 
+def create_comprehensive_index(
+    df_with_topics,
+    lda_model,
+    topic_scores,
+    lolbas_keywords,
+    output_dir,
+    total_processing_time=None
+):
+    """
+    Creates a comprehensive index.html that serves as the main entry point to all analysis results.
+    This is the primary deliverable showcasing the full analytical journey.
+    
+    Args:
+        df_with_topics: DataFrame with all analysis results
+        lda_model: Trained LDA model
+        topic_scores: Security analysis scores
+        lolbas_keywords: List of LOLBAS keywords
+        output_dir: Directory to save all output files
+        total_processing_time: Total time taken for analysis (optional)
+    """
+    import os
+    from pathlib import Path
+    import json
+    from datetime import datetime
+    
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # Generate all visualizations
+    treemap_fig = create_topic_treemap_gensim(df_with_topics, lda_model)
+    heatmap_fig = create_topic_heatmap(df_with_topics, lda_model)
+    sunburst_fig = create_topic_distribution_chart(df_with_topics, lda_model)
+    length_fig = create_command_length_distribution(df_with_topics)
+    
+    security_fig = None
+    if topic_scores is not None:
+        security_fig = create_security_score_chart(topic_scores, df_with_topics, lda_model)
+    
+    # Generate summary statistics
+    total_commands = len(df_with_topics)
+    unique_topics = df_with_topics['topic'].nunique()
+    
+    # Calculate key metrics
+    lolbas_count = df_with_topics['contains_lolbas'].sum() if 'contains_lolbas' in df_with_topics.columns else 0
+    lolbas_percentage = (lolbas_count / total_commands * 100) if total_commands > 0 else 0
+    
+    mitre_count = 0
+    if 'mitre_count' in df_with_topics.columns:
+        mitre_count = (df_with_topics['mitre_count'] > 0).sum()
+    
+    avg_complexity = df_with_topics['complexity_score'].mean() if 'complexity_score' in df_with_topics.columns else 0
+    
+    # Get top 3 riskiest topics
+    high_risk_topics = []
+    if topic_scores is not None:
+        for topic_id, row in topic_scores.head(3).iterrows():
+            topic_name = generate_smart_topic_summary(topic_id, lda_model, df_with_topics)
+            high_risk_topics.append({
+                'id': topic_id,
+                'name': topic_name,
+                'risk_score': row['risk_score'],
+                'lolbas_count': int(row['lolbas_count']),
+                'doc_count': int(row['total_count'])
+            })
+    
+    # Create comprehensive index.html
+    index_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCLaaC Analysis Report - Command Line Security Analysis</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #2d3748;
+        }}
+        
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }}
+        
+        .hero {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 60px 40px;
+            text-align: center;
+        }}
+        
+        .hero h1 {{
+            font-size: 3em;
+            margin-bottom: 15px;
+            font-weight: 800;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }}
+        
+        .hero .subtitle {{
+            font-size: 1.4em;
+            opacity: 0.95;
+            margin-bottom: 10px;
+        }}
+        
+        .hero .timestamp {{
+            font-size: 1em;
+            opacity: 0.8;
+            margin-top: 20px;
+        }}
+        
+        .summary-cards {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            padding: 40px;
+            background: #f7fafc;
+        }}
+        
+        .card {{
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }}
+        
+        .card:hover {{
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }}
+        
+        .card .icon {{
+            font-size: 3em;
+            margin-bottom: 15px;
+        }}
+        
+        .card .value {{
+            font-size: 2.5em;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 10px;
+        }}
+        
+        .card .label {{
+            font-size: 1.1em;
+            color: #718096;
+            font-weight: 500;
+        }}
+        
+        .card .detail {{
+            font-size: 0.9em;
+            color: #a0aec0;
+            margin-top: 8px;
+        }}
+        
+        .section {{
+            padding: 40px;
+        }}
+        
+        .section-title {{
+            font-size: 2em;
+            font-weight: 700;
+            margin-bottom: 25px;
+            color: #2d3748;
+            border-left: 6px solid #667eea;
+            padding-left: 20px;
+        }}
+        
+        .risk-topics {{
+            display: grid;
+            gap: 20px;
+            margin-top: 20px;
+        }}
+        
+        .risk-topic {{
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            border-left: 5px solid #f56565;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }}
+        
+        .risk-topic.high {{
+            border-left-color: #f56565;
+            background: linear-gradient(90deg, #fff5f5 0%, white 100%);
+        }}
+        
+        .risk-topic.medium {{
+            border-left-color: #ed8936;
+            background: linear-gradient(90deg, #fffaf0 0%, white 100%);
+        }}
+        
+        .risk-topic.low {{
+            border-left-color: #48bb78;
+            background: linear-gradient(90deg, #f0fff4 0%, white 100%);
+        }}
+        
+        .risk-topic h3 {{
+            font-size: 1.4em;
+            margin-bottom: 10px;
+            color: #2d3748;
+        }}
+        
+        .risk-topic .metrics {{
+            display: flex;
+            gap: 30px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }}
+        
+        .risk-topic .metric {{
+            display: flex;
+            flex-direction: column;
+        }}
+        
+        .risk-topic .metric-value {{
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #667eea;
+        }}
+        
+        .risk-topic .metric-label {{
+            font-size: 0.9em;
+            color: #718096;
+        }}
+        
+        .action-buttons {{
+            display: flex;
+            gap: 20px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }}
+        
+        .btn {{
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }}
+        
+        .btn-primary {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }}
+        
+        .btn-primary:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }}
+        
+        .btn-secondary {{
+            background: #4a5568;
+            color: white;
+        }}
+        
+        .btn-secondary:hover {{
+            background: #2d3748;
+            transform: translateY(-2px);
+        }}
+        
+        .features-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-top: 30px;
+        }}
+        
+        .feature-card {{
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            text-align: center;
+            transition: all 0.3s;
+        }}
+        
+        .feature-card:hover {{
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }}
+        
+        .feature-card .icon {{
+            font-size: 3.5em;
+            margin-bottom: 20px;
+        }}
+        
+        .feature-card h3 {{
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            color: #2d3748;
+        }}
+        
+        .feature-card p {{
+            color: #718096;
+            line-height: 1.6;
+        }}
+        
+        .footer {{
+            background: #2d3748;
+            color: white;
+            padding: 30px 40px;
+            text-align: center;
+        }}
+        
+        .footer a {{
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }}
+        
+        .footer a:hover {{
+            text-decoration: underline;
+        }}
+        
+        .methodology {{
+            background: #edf2f7;
+            padding: 30px;
+            border-radius: 10px;
+            margin-top: 30px;
+        }}
+        
+        .methodology h3 {{
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            color: #2d3748;
+        }}
+        
+        .methodology ol {{
+            margin-left: 20px;
+            line-height: 2;
+            color: #4a5568;
+        }}
+        
+        .badge {{
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-right: 8px;
+        }}
+        
+        .badge-danger {{
+            background: #fed7d7;
+            color: #c53030;
+        }}
+        
+        .badge-warning {{
+            background: #feebc8;
+            color: #c05621;
+        }}
+        
+        .badge-success {{
+            background: #c6f6d5;
+            color: #276749;
+        }}
+        
+        .badge-info {{
+            background: #bee3f8;
+            color: #2c5282;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Hero Section -->
+        <div class="hero">
+            <h1>🔍 TCLaaC Analysis Report</h1>
+            <p class="subtitle">The Command Line as a Corpus - Comprehensive Security Analysis</p>
+            <p class="timestamp">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            {f'<p class="timestamp">Processing Time: {total_processing_time:.2f}s ({total_processing_time/60:.2f} minutes)</p>' if total_processing_time else ''}
+        </div>
+        
+        <!-- Summary Cards -->
+        <div class="summary-cards">
+            <div class="card">
+                <div class="icon">📊</div>
+                <div class="value">{total_commands:,}</div>
+                <div class="label">Total Commands Analyzed</div>
+            </div>
+            
+            <div class="card">
+                <div class="icon">🏷️</div>
+                <div class="value">{unique_topics}</div>
+                <div class="label">Discovered Topics</div>
+                <div class="detail">Distinct command patterns</div>
+            </div>
+            
+            <div class="card">
+                <div class="icon">🚫</div>
+                <div class="value">{lolbas_count:,}</div>
+                <div class="label">LOLBAS Detections</div>
+                <div class="detail">{lolbas_percentage:.1f}% of commands</div>
+            </div>
+            
+            <div class="card">
+                <div class="icon">🎯</div>
+                <div class="value">{mitre_count:,}</div>
+                <div class="label">MITRE ATT&CK Matches</div>
+                <div class="detail">Technique mappings found</div>
+            </div>
+            
+            <div class="card">
+                <div class="icon">⚡</div>
+                <div class="value">{avg_complexity:.0f}/100</div>
+                <div class="label">Avg Complexity Score</div>
+                <div class="detail">Command obfuscation level</div>
+            </div>
+        </div>
+        
+        <!-- High Risk Topics Section -->
+        <div class="section">
+            <h2 class="section-title">🔴 High Risk Topics</h2>
+            <p style="color: #718096; margin-bottom: 20px;">Topics with elevated security risk based on LOLBAS density, MITRE ATT&CK coverage, and command complexity.</p>
+            
+            <div class="risk-topics">"""
+    
+    # Add high risk topic cards
+    for i, topic in enumerate(high_risk_topics):
+        risk_class = 'high' if i == 0 else ('medium' if i == 1 else 'low')
+        risk_badge = f'<span class="badge badge-danger">Critical</span>' if i == 0 else (f'<span class="badge badge-warning">High</span>' if i == 1 else f'<span class="badge badge-info">Medium</span>')
+        
+        index_html += f"""
+                <div class="risk-topic {risk_class}">
+                    <h3>Topic #{topic['id']}: {topic['name']} {risk_badge}</h3>
+                    <div class="metrics">
+                        <div class="metric">
+                            <span class="metric-value">{topic['risk_score']:.1f}</span>
+                            <span class="metric-label">Risk Score</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value">{topic['lolbas_count']}</span>
+                            <span class="metric-label">LOLBAS Commands</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value">{topic['doc_count']}</span>
+                            <span class="metric-label">Total Commands</span>
+                        </div>
+                    </div>
+                </div>"""
+    
+    index_html += """
+            </div>
+        </div>
+        
+        <!-- Analysis Features Section -->
+        <div class="section" style="background: #f7fafc;">
+            <h2 class="section-title">🎨 Interactive Visualizations</h2>
+            <p style="color: #718096; margin-bottom: 30px;">Explore the analysis results through multiple interactive visualizations that reveal command patterns, security risks, and topic distributions.</p>
+            
+            <div class="action-buttons">
+                <a href="analysis_dashboard.html" class="btn btn-primary">
+                    📊 Open Interactive Dashboard
+                </a>
+                <a href="topic_summary.csv" class="btn btn-secondary">
+                    📥 Download Topic Summary (CSV)
+                </a>
+                <a href="analysis_dataframe.parquet" class="btn btn-secondary">
+                    💾 Download Full Results (Parquet)
+                </a>
+            </div>
+            
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="icon">🌳</div>
+                    <h3>Topic Treemap</h3>
+                    <p>Hierarchical view of command groups organized by topic with fuzzy matching for similar commands.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="icon">🔥</div>
+                    <h3>Word Heatmap</h3>
+                    <p>Distribution of top words across all topics revealing key patterns and terminology.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="icon">🛡️</div>
+                    <h3>Security Risk Analysis</h3>
+                    <p>Comprehensive risk scoring based on LOLBAS density, MITRE ATT&CK techniques, and complexity.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="icon">🌟</div>
+                    <h3>Topic Distribution</h3>
+                    <p>Sunburst visualization showing the proportion of commands in each discovered topic.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="icon">📏</div>
+                    <h3>Complexity Analysis</h3>
+                    <p>Command length and complexity distribution by topic to identify obfuscation patterns.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="icon">🎯</div>
+                    <h3>LOLBAS Filtering</h3>
+                    <p>Dynamic filtering to focus on or exclude Living-off-the-Land binary usage.</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Methodology Section -->
+        <div class="section">
+            <h2 class="section-title">🔬 Analysis Methodology</h2>
+            
+            <div class="methodology">
+                <h3>Pipeline Workflow</h3>
+                <ol>
+                    <li><strong>Data Loading & Enrichment</strong> - Load Sysmon Event ID 1 logs and enrich with LOLBAS command examples</li>
+                    <li><strong>Text Preprocessing</strong> - Normalize commands (GUIDs, IPs, paths) and tokenize using custom regex patterns</li>
+                    <li><strong>Topic Modeling</strong> - Train LDA model with hyperparameter tuning to discover latent command patterns</li>
+                    <li><strong>Security Analysis</strong> - Map commands to MITRE ATT&CK techniques and calculate risk scores</li>
+                    <li><strong>Visualization Generation</strong> - Create interactive dashboards showcasing all analysis results</li>
+                </ol>
+                
+                <h3 style="margin-top: 25px;">Risk Scoring Formula</h3>
+                <p style="color: #4a5568; margin-top: 10px;">
+                    Risk Score = (LOLBAS Density × 0.4) + (MITRE Coverage × 10 × 0.3) + (Avg Complexity × 0.15) + (Unique Binaries × 2 × 0.15)
+                </p>
+            </div>
+        </div>
+        
+        <!-- Key Insights Section -->
+        <div class="section" style="background: #f7fafc;">
+            <h2 class="section-title">💡 Key Insights</h2>
+            
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="icon">📈</div>
+                    <h3>Pattern Discovery</h3>
+                    <p>Identified {unique_topics} distinct command-line usage patterns through unsupervised learning.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="icon">🎯</div>
+                    <h3>LOLBAS Coverage</h3>
+                    <p>{lolbas_percentage:.1f}% of analyzed commands utilize Living-off-the-Land binaries.</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="icon">🔍</div>
+                    <h3>Attack Techniques</h3>
+                    <p>Mapped {mitre_count:,} commands to known MITRE ATT&CK techniques for threat intelligence.</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p style="font-size: 1.1em; margin-bottom: 10px;">
+                <strong>TCLaaC - The Command Line as a Corpus</strong>
+            </p>
+            <p style="margin-bottom: 15px;">
+                NLP-based Security Log Analysis using LDA Topic Modeling
+            </p>
+            <p>
+                <a href="https://github.com/CampbellTrevor/TCLaaC" target="_blank">GitHub Repository</a> | 
+                <a href="https://lolbas-project.github.io/" target="_blank">LOLBAS Project</a> | 
+                <a href="https://attack.mitre.org/" target="_blank">MITRE ATT&CK</a>
+            </p>
+            <p style="margin-top: 20px; opacity: 0.7; font-size: 0.9em;">
+                © 2025 | Built with Python, Gensim, Plotly, and scikit-learn
+            </p>
+        </div>
+    </div>
+</body>
+</html>"""
+    
+    # Write index.html
+    index_path = output_path / 'index.html'
+    with open(index_path, 'w', encoding='utf-8') as f:
+        f.write(index_html)
+    
+    # Also create the analysis_dashboard.html (SPA with all plots)
+    create_analysis_spa(
+        treemap_fig=treemap_fig,
+        heatmap_fig=heatmap_fig,
+        security_fig=security_fig,
+        sunburst_fig=sunburst_fig,
+        length_fig=length_fig,
+        lolbas_keywords=lolbas_keywords,
+        output_path=str(output_path / 'analysis_dashboard.html')
+    )
+    
+    return str(index_path)
+
+
 def create_analysis_spa(treemap_fig, heatmap_fig, security_fig, sunburst_fig, length_fig, lolbas_keywords, output_path):
     """
     Creates a Single Page Application (SPA) combining all visualizations with tabs.

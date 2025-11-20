@@ -105,11 +105,38 @@ NORMALIZATION_RULES_COMPILED = {
         '<BASE64_STRING>'
     ),
     
+    # --- File Path Rules (must come before network rules) ---
+    # Matches UNC paths (before IP addresses to avoid conflicts)
+    'unc_paths': (
+        re.compile(r'\\\\[^\s<>:"/|?*]+\\[^\s<>:"/|?*\\]+'),
+        '<UNC_PATH>'
+    ),
+    # Matches Windows paths with drive letters
+    'windows_paths': (
+        re.compile(r'[A-Za-z]:\\(?:[^\s<>:"/\\|?*]+\\)*[^\s<>:"/\\|?*]*'),
+        '<WINDOWS_PATH>'
+    ),
+    
     # --- Network Rules ---
+    # Matches URLs (http/https/ftp)
+    'urls': (
+        re.compile(r'\b(?:https?|ftp)://[^\s<>"{}|\\^`\[\]]+\b', re.IGNORECASE),
+        '<URL>'
+    ),
     # Matches IPv4 addresses, with an optional port number.
     'ip_addresses': (
         re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d{1,5})?\b'),
         '<IP_ADDRESS>'
+    ),
+    # Matches email addresses
+    'emails': (
+        re.compile(r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b'),
+        '<EMAIL>'
+    ),
+    # Matches domain names without protocol
+    'domains': (
+        re.compile(r'\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b', re.IGNORECASE),
+        '<DOMAIN>'
     ),
 
     # --- Date & Time Rules ---
@@ -118,10 +145,27 @@ NORMALIZATION_RULES_COMPILED = {
         re.compile(r'\b\d{4}-\d{2}-\d{2}\b'),
         '<DATE>'
     ),
+    # Matches dates in MM/DD/YYYY format
+    'dates_mm-dd-yyyy': (
+        re.compile(r'\b\d{2}/\d{2}/\d{4}\b'),
+        '<DATE>'
+    ),
     # Matches times in HH:MM:SS format.
     'times_hh-mm-ss': (
         re.compile(r'\b\d{2}:\d{2}:\d{2}\b'),
         '<TIME>'
+    ),
+    # Matches timestamps with milliseconds
+    'timestamps': (
+        re.compile(r'\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3,6})?Z?\b'),
+        '<TIMESTAMP>'
+    ),
+
+    # --- Windows Registry Rules ---
+    # Matches Windows registry paths
+    'registry_keys': (
+        re.compile(r'\b(?:HKEY_[A-Z_]+|HKLM|HKCU|HKCR|HKU|HKCC)(?:\\[^\s\\]+)*\b', re.IGNORECASE),
+        '<REGISTRY_KEY>'
     ),
 
     # --- General Number & Code Rules ---
@@ -134,6 +178,11 @@ NORMALIZATION_RULES_COMPILED = {
     'long_numbers': (
         re.compile(r'\b\d{6,}\b'),
         '<LONG_NUMBER>'
+    ),
+    # Matches process IDs (PID: followed by numbers)
+    'process_ids': (
+        re.compile(r'\bPID:\s*\d+\b', re.IGNORECASE),
+        '<PROCESS_ID>'
     )
 }
 
@@ -166,6 +215,38 @@ COMMON_PATTERNS = [
     '{exe} add value',
     '{exe} /create /tn {task} /tr {path}',
 ]
+
+# =============================================================================
+# SECURITY ANALYSIS CONFIGURATION
+# =============================================================================
+
+# MITRE ATT&CK technique mapping keywords
+MITRE_ATTACK_PATTERNS = {
+    'T1059': ['powershell', 'cmd', 'wscript', 'cscript', 'bash'],  # Command and Scripting Interpreter
+    'T1053': ['schtasks', 'at.exe', 'cron'],  # Scheduled Task/Job
+    'T1105': ['certutil', 'bitsadmin', 'wget', 'curl', 'download'],  # Ingress Tool Transfer
+    'T1218': ['rundll32', 'regsvr32', 'mshta', 'msiexec'],  # System Binary Proxy Execution
+    'T1547': ['reg add', 'hklm\\software\\microsoft\\windows\\currentversion\\run'],  # Boot or Logon Autostart
+    'T1003': ['lsass', 'mimikatz', 'procdump', 'dump'],  # Credential Dumping
+    'T1055': ['inject', 'createremotethread'],  # Process Injection
+    'T1027': ['base64', 'encode', 'compress', 'obfuscate'],  # Obfuscated Files or Information
+}
+
+# Command sequence patterns that indicate attack chains
+ATTACK_CHAIN_PATTERNS = [
+    ['powershell', 'download', 'execute'],
+    ['certutil', 'decode', 'execute'],
+    ['reg add', 'run'],
+    ['schtasks', 'create'],
+]
+
+# Risk score weights
+RISK_SCORE_WEIGHTS = {
+    'lolbas_density': 0.4,
+    'mitre_coverage': 0.3,
+    'command_complexity': 0.15,
+    'unique_binaries': 0.15,
+}
 
 # =============================================================================
 # LOGGING CONFIGURATION

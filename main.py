@@ -479,66 +479,46 @@ class TCLaaCPipeline:
         except Exception as e:
             logger.error(f"Error during visualization: {e}")
     
-    def create_analysis_visualizations(self, output_dir: str = '.'):
+    def create_analysis_visualizations(self, output_dir: str = '.', total_time: float = None):
         """
-        Generate a comprehensive Single Page Application (SPA) with all visualizations.
+        Generate comprehensive visualizations including index.html and analysis dashboard.
         
         Args:
-            output_dir: Directory to save visualization file
+            output_dir: Directory to save visualization files
+            total_time: Total processing time for the pipeline
         """
         logger.info("=" * 70)
-        logger.info("CREATING ANALYSIS DASHBOARD (SPA)")
+        logger.info("CREATING COMPREHENSIVE ANALYSIS DASHBOARD")
         logger.info("=" * 70)
         
-        from graphs import (
-            create_topic_heatmap, 
-            create_security_score_chart,
-            create_topic_distribution_chart,
-            create_command_length_distribution,
-            create_analysis_spa
-        )
+        from graphs import create_comprehensive_index
         
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
         try:
-            logger.info("Generating all visualizations...")
-            
-            # Generate individual plots
-            treemap_fig = create_topic_treemap_gensim(
-                self.df_with_topics,
-                self.lda_model,
-                similarity_threshold=config.SIMILARITY_THRESHOLD
-            )
-            
-            heatmap_fig = create_topic_heatmap(self.df_with_topics, self.lda_model)
-            
-            security_fig = None
-            if hasattr(self, 'topic_scores') and self.topic_scores is not None:
-                security_fig = create_security_score_chart(self.topic_scores, self.df_with_topics, self.lda_model)
-            
-            sunburst_fig = create_topic_distribution_chart(self.df_with_topics, self.lda_model)
-            
-            length_fig = create_command_length_distribution(self.df_with_topics)
+            logger.info("Generating all visualizations and reports...")
             
             # Get LOLBAS keywords for filtering
             lolbas_keywords = []
             if os.path.exists(LOLBAS_REPO_PATH):
                 lolbas_keywords = generate_keywords_from_lolbas(LOLBAS_REPO_PATH)
             
-            # Create SPA combining all visualizations
-            spa_path = output_path / 'analysis_dashboard.html'
-            create_analysis_spa(
-                treemap_fig=treemap_fig,
-                heatmap_fig=heatmap_fig,
-                security_fig=security_fig,
-                sunburst_fig=sunburst_fig,
-                length_fig=length_fig,
+            # Get topic scores if available
+            topic_scores = getattr(self, 'topic_scores', None)
+            
+            # Create comprehensive index.html and all visualizations
+            index_path = create_comprehensive_index(
+                df_with_topics=self.df_with_topics,
+                lda_model=self.lda_model,
+                topic_scores=topic_scores,
                 lolbas_keywords=lolbas_keywords,
-                output_path=str(spa_path)
+                output_dir=output_dir,
+                total_processing_time=total_time
             )
             
-            logger.info(f"✓ Analysis dashboard created: {spa_path}\n")
+            logger.info(f"✓ Comprehensive index created: {index_path}")
+            logger.info(f"✓ Interactive dashboard created: {output_path / 'analysis_dashboard.html'}\n")
             
         except Exception as e:
             logger.error(f"Error creating visualizations: {e}")
@@ -621,13 +601,14 @@ class TCLaaCPipeline:
             self.assign_topics()
             self.analyze_security()
             
-            if visualize:
-                # Generate comprehensive analysis dashboard (SPA)
-                self.create_analysis_visualizations(output_dir)
-            
             self.save_results(output_dir)
             
             total_time = time.time() - pipeline_start
+            
+            if visualize:
+                # Generate comprehensive analysis dashboard with timing info
+                self.create_analysis_visualizations(output_dir, total_time)
+            
             logger.info("=" * 70)
             logger.info(f"✓ PIPELINE COMPLETE in {total_time:.2f}s ({total_time/60:.2f} minutes)")
             logger.info("=" * 70)

@@ -35,8 +35,6 @@ def load_from_csv(filepath: str, column_name: str = 'command_line') -> pd.DataFr
         FileNotFoundError: If the CSV file doesn't exist
         KeyError: If the specified column is not found
     """
-    logger.info(f"Loading data from CSV: {filepath}")
-    
     try:
         df = pd.read_csv(filepath)
     except FileNotFoundError:
@@ -62,9 +60,8 @@ def load_from_csv(filepath: str, column_name: str = 'command_line') -> pd.DataFr
     dropped = initial_count - len(df)
     
     if dropped > 0:
-        logger.warning(f"Dropped {dropped} rows with null values")
+        logger.info(f"Dropped {dropped} rows with null values")
     
-    logger.info(f"Loaded {len(df)} command lines from CSV")
     return df
 
 
@@ -87,8 +84,6 @@ def generate_synthetic_data(num_samples: int = 10000, seed: Optional[int] = None
     
     random.seed(seed)
     np.random.seed(seed)
-    
-    logger.info(f"Generating {num_samples} synthetic command lines...")
     
     commands = []
     
@@ -170,7 +165,6 @@ def generate_synthetic_data(num_samples: int = 10000, seed: Optional[int] = None
         commands.append(command)
     
     df = pd.DataFrame({'command_line': commands})
-    logger.info(f"Generated {len(df)} synthetic command lines")
     
     return df
 
@@ -251,10 +245,9 @@ def validate_dataframe(df: pd.DataFrame) -> bool:
     if duplicate_ratio > 0.95:
         logger.warning(
             f"Dataset is {duplicate_ratio*100:.1f}% duplicates. "
-            "This may affect topic modeling quality."
+            "May affect topic modeling quality."
         )
     
-    logger.info(f"✓ DataFrame validation passed: {len(df)} rows, {non_null} non-null")
     return True
 
 

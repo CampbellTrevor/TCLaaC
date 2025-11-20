@@ -29,6 +29,7 @@ from joblib import parallel_backend
 import numpy as np
 from gensim.corpora import Dictionary
 from gensim.models import LdaMulticore, CoherenceModel, LdaModel
+from collections import Counter
 
 def tune_lda_perplexity(doc_term_matrix: np.ndarray, min_topics: int = 5, max_topics: int = 50, step: int = 5):
     """
@@ -85,6 +86,87 @@ def tune_lda_perplexity(doc_term_matrix: np.ndarray, min_topics: int = 5, max_to
     print(f"\nBest Perplexity Score found at {best_n_topics} topics.")
 
 
+def generate_smart_topic_summary(topic_idx: int, lda_model: LdaMulticore, df_with_topics: pd.DataFrame) -> str:
+    """
+    Generates a smart, human-readable summary for a topic based on content analysis.
+    
+    Instead of just listing TF-IDF keywords, this analyzes the actual commands in the topic
+    to identify the most common executable and the primary action/purpose.
+    
+    Args:
+        topic_idx: The topic index
+        lda_model: The trained LDA model
+        df_with_topics: DataFrame with topic assignments and tokens
+        
+    Returns:
+        A descriptive string summarizing what the topic represents
+    """
+    # Get top words for context
+    topic_words = [word for word, _ in lda_model.show_topic(topic_idx, topn=10)]
+    
+    # Get documents in this topic
+    topic_docs = df_with_topics[df_with_topics['topic'] == topic_idx]
+    
+    if len(topic_docs) == 0:
+        return f"Topic {topic_idx}: Empty"
+    
+    # Analyze root commands
+    if 'root_command' in topic_docs.columns:
+        root_commands = topic_docs['root_command'].value_counts()
+        most_common_exe = root_commands.index[0] if len(root_commands) > 0 else None
+    else:
+        most_common_exe = None
+    
+    # Analyze tokens to find common patterns
+    all_tokens = []
+    for tokens in topic_docs['tokens']:
+        all_tokens.extend(tokens)
+    
+    token_counts = Counter(all_tokens)
+    
+    # Filter out the executable name itself to find action words
+    filtered_tokens = {k: v for k, v in token_counts.most_common(15) 
+                      if k not in [most_common_exe, most_common_exe.lower() if most_common_exe else None]}
+    
+    # Identify the nature of the topic based on key patterns
+    action_indicators = {
+        'network': ['http', 'url', 'download', 'web', 'net', 'tcp', 'ip', 'port'],
+        'file': ['file', 'dir', 'copy', 'move', 'delete', 'write', 'read', 'path'],
+        'registry': ['reg', 'hkey', 'hklm', 'hkcu', 'registry', 'key'],
+        'execution': ['exec', 'run', 'start', 'invoke', 'call', 'execute', 'launch'],
+        'scripting': ['script', 'powershell', 'cmd', 'batch', 'command'],
+        'admin': ['admin', 'user', 'privilege', 'elevated', 'system'],
+        'scheduled': ['task', 'schtasks', 'schedule', 'cron', 'at'],
+        'encoding': ['encode', 'decode', 'base64', 'certutil'],
+    }
+    
+    detected_category = None
+    for category, keywords in action_indicators.items():
+        if any(keyword in token for token in filtered_tokens.keys() for keyword in keywords):
+            detected_category = category
+            break
+    
+    # Build a descriptive name
+    if most_common_exe:
+        exe_name = most_common_exe.replace('.exe', '').capitalize()
+        if detected_category:
+            return f"{exe_name} {detected_category.capitalize()} Operations"
+        else:
+            # Use the most common non-exe token as descriptor
+            descriptive_tokens = [t for t in filtered_tokens.keys() 
+                                if not t.startswith('<') and len(t) > 2]
+            if descriptive_tokens:
+                descriptor = descriptive_tokens[0].capitalize()
+                return f"{exe_name} {descriptor} Activity"
+            return f"{exe_name} Commands"
+    else:
+        if detected_category:
+            return f"{detected_category.capitalize()} Operations"
+        # Fallback to top meaningful words
+        meaningful = [w for w in topic_words if not w.startswith('<') and len(w) > 2][:3]
+        return f"Topic {topic_idx}: {', '.join(meaningful).capitalize()}"
+
+
 def create_topic_treemap_gensim(df_with_topics: pd.DataFrame, lda_model: LdaMulticore, similarity_threshold: int = 40) -> go.Figure:
     """
     Generates a grouped, interactive treemap from a gensim LDA model.
@@ -115,16 +197,13 @@ def create_topic_treemap_gensim(df_with_topics: pd.DataFrame, lda_model: LdaMult
         KeyError: If the input DataFrame `df_with_topics` does not contain the
                   required 'normalized_command' column.
     """
-    print("--- Preparing data and generating treemap for gensim model ---")
+    print("Generating topic treemap visualization...")
 
-    # Part 1: Generate topic summaries directly from the gensim model.
-    # This process extracts the top keywords for each topic to create a
-    # descriptive, human-readable label.
-    # The result is a dictionary mapping topic indices to formatted strings.
-    topic_summaries = {
-        topic_idx: f"Topic {topic_idx}: " + ", ".join([word.split('*')[1].strip().strip('"') for word in topic.split(' + ')])
-        for topic_idx, topic in lda_model.print_topics(num_words=4)
-    }
+    # Part 1: Generate smart topic summaries based on content analysis
+    topic_summaries = {}
+    for topic_idx in range(lda_model.num_topics):
+        topic_summaries[topic_idx] = generate_smart_topic_summary(topic_idx, lda_model, df_with_topics)
+    
     # Add a summary for documents that were not strongly assigned to any topic.
     topic_summaries[-1] = "Unassigned"
 
@@ -208,3 +287,597 @@ def create_topic_treemap_gensim(df_with_topics: pd.DataFrame, lda_model: LdaMult
     fig.update_layout(margin=dict(t=50, l=25, r=25, b=25), font=dict(size=14))
 
     return fig
+
+
+def create_topic_heatmap(df_with_topics: pd.DataFrame, lda_model: LdaMulticore) -> go.Figure:
+    """
+    Creates an interactive heatmap showing the distribution of top words across topics.
+    
+    Args:
+        df_with_topics: DataFrame with topic assignments
+        lda_model: Trained LDA model
+        
+    Returns:
+        Plotly Figure object
+    """
+    # Get top words for each topic
+    num_topics = lda_model.num_topics
+    top_n = 15
+    
+    # Build matrix of word probabilities across topics
+    topic_words = {}
+    all_words = set()
+    
+    for topic_idx in range(num_topics):
+        words_probs = lda_model.show_topic(topic_idx, topn=top_n)
+        topic_words[topic_idx] = {word: prob for word, prob in words_probs}
+        all_words.update([word for word, _ in words_probs])
+    
+    # Create matrix
+    words_list = sorted(list(all_words))
+    matrix = []
+    for word in words_list:
+        row = [topic_words[topic_idx].get(word, 0) for topic_idx in range(num_topics)]
+        matrix.append(row)
+    
+    # Create heatmap
+    fig = go.Figure(data=go.Heatmap(
+        z=matrix,
+        x=[f'Topic {i}' for i in range(num_topics)],
+        y=words_list,
+        colorscale='Viridis',
+        hoverongaps=False
+    ))
+    
+    fig.update_layout(
+        title='Topic-Word Distribution Heatmap',
+        xaxis_title='Topics',
+        yaxis_title='Words',
+        height=max(600, len(words_list) * 20)
+    )
+    
+    return fig
+
+
+def create_security_score_chart(topic_scores: pd.DataFrame, df_with_topics: pd.DataFrame, lda_model: LdaMulticore) -> go.Figure:
+    """
+    Creates a bar chart showing security scores (LOLBAS density) for each topic.
+    
+    Args:
+        topic_scores: DataFrame with security scores per topic
+        df_with_topics: DataFrame with topic assignments
+        lda_model: Trained LDA model
+        
+    Returns:
+        Plotly Figure object
+    """
+    from graphs import generate_smart_topic_summary
+    
+    # Get topic names
+    topic_names = []
+    lolbas_density = []
+    doc_counts = []
+    
+    for topic_id in topic_scores.index:
+        topic_name = generate_smart_topic_summary(topic_id, lda_model, df_with_topics)
+        topic_names.append(f"T{topic_id}: {topic_name}")
+        lolbas_density.append(topic_scores.loc[topic_id, 'lolbas_density'])
+        doc_counts.append(topic_scores.loc[topic_id, 'total_count'])
+    
+    # Create bar chart
+    fig = go.Figure(data=[
+        go.Bar(
+            x=topic_names,
+            y=lolbas_density,
+            marker=dict(
+                color=lolbas_density,
+                colorscale='Reds',
+                showscale=True,
+                colorbar=dict(title="LOLBAS<br>Density")
+            ),
+            text=[f"{d:.1f}%<br>({int(c)} docs)" for d, c in zip(lolbas_density, doc_counts)],
+            textposition='outside',
+            hovertemplate='<b>%{x}</b><br>LOLBAS Density: %{y:.2f}%<extra></extra>'
+        )
+    ])
+    
+    fig.update_layout(
+        title='Topic Security Risk Score (LOLBAS Density)',
+        xaxis_title='Topics',
+        yaxis_title='LOLBAS Density (%)',
+        height=500,
+        showlegend=False,
+        xaxis={'tickangle': -45}
+    )
+    
+    return fig
+
+
+def create_topic_distribution_chart(df_with_topics: pd.DataFrame, lda_model: LdaMulticore) -> go.Figure:
+    """
+    Creates an interactive sunburst chart showing topic distribution.
+    
+    Args:
+        df_with_topics: DataFrame with topic assignments
+        lda_model: Trained LDA model
+        
+    Returns:
+        Plotly Figure object
+    """
+    from graphs import generate_smart_topic_summary
+    
+    # Count documents per topic
+    topic_counts = df_with_topics['topic'].value_counts().sort_index()
+    
+    # Prepare data
+    labels = []
+    parents = []
+    values = []
+    
+    # Root
+    labels.append("All Commands")
+    parents.append("")
+    values.append(len(df_with_topics))
+    
+    # Topics
+    for topic_id, count in topic_counts.items():
+        topic_name = generate_smart_topic_summary(topic_id, lda_model, df_with_topics)
+        labels.append(f"Topic {topic_id}: {topic_name}")
+        parents.append("All Commands")
+        values.append(count)
+    
+    fig = go.Figure(go.Sunburst(
+        labels=labels,
+        parents=parents,
+        values=values,
+        branchvalues="total",
+        hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percentRoot:.1%}<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title='Topic Distribution Sunburst',
+        height=600
+    )
+    
+    return fig
+
+
+def create_command_length_distribution(df_with_topics: pd.DataFrame) -> go.Figure:
+    """
+    Creates a box plot showing command length distribution by topic.
+    
+    Args:
+        df_with_topics: DataFrame with topic assignments and tokens
+        
+    Returns:
+        Plotly Figure object
+    """
+    # Calculate command lengths
+    df_plot = df_with_topics.copy()
+    df_plot['token_count'] = df_plot['tokens'].apply(len)
+    
+    fig = go.Figure()
+    
+    for topic_id in sorted(df_plot['topic'].unique()):
+        topic_data = df_plot[df_plot['topic'] == topic_id]['token_count']
+        fig.add_trace(go.Box(
+            y=topic_data,
+            name=f'Topic {topic_id}',
+            boxmean='sd'
+        ))
+    
+    fig.update_layout(
+        title='Command Length Distribution by Topic',
+        xaxis_title='Topic',
+        yaxis_title='Number of Tokens',
+        height=500,
+        showlegend=True
+    )
+    
+    return fig
+
+
+def create_analysis_spa(treemap_fig, heatmap_fig, security_fig, sunburst_fig, length_fig, lolbas_keywords, output_path):
+    """
+    Creates a Single Page Application (SPA) combining all visualizations with tabs.
+    Includes dynamic LOLBAS filtering for the treemap.
+    
+    Args:
+        treemap_fig: Plotly treemap figure
+        heatmap_fig: Plotly heatmap figure
+        security_fig: Plotly security chart figure (or None)
+        sunburst_fig: Plotly sunburst figure
+        length_fig: Plotly box plot figure
+        lolbas_keywords: List of LOLBAS keywords for filtering
+        output_path: Path to save the HTML file
+    """
+    import json
+    
+    # Convert figures to JSON for embedding
+    treemap_json = treemap_fig.to_json()
+    heatmap_json = heatmap_fig.to_json()
+    security_json = security_fig.to_json() if security_fig else 'null'
+    sunburst_json = sunburst_fig.to_json()
+    length_json = length_fig.to_json()
+    
+    # Escape LOLBAS keywords for JavaScript
+    lolbas_json = json.dumps(lolbas_keywords)
+    
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCLaaC Analysis Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }}
+        
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }}
+        
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }}
+        
+        .header h1 {{
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }}
+        
+        .header p {{
+            font-size: 1.1em;
+            opacity: 0.9;
+        }}
+        
+        .tabs {{
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+            overflow-x: auto;
+        }}
+        
+        .tab {{
+            padding: 18px 30px;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-size: 16px;
+            font-weight: 500;
+            color: #6c757d;
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+            white-space: nowrap;
+        }}
+        
+        .tab:hover {{
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+        }}
+        
+        .tab.active {{
+            color: #667eea;
+            border-bottom-color: #667eea;
+            background: white;
+        }}
+        
+        .tab-content {{
+            display: none;
+            padding: 30px;
+            animation: fadeIn 0.3s;
+        }}
+        
+        .tab-content.active {{
+            display: block;
+        }}
+        
+        @keyframes fadeIn {{
+            from {{ opacity: 0; transform: translateY(10px); }}
+            to {{ opacity: 1; transform: translateY(0); }}
+        }}
+        
+        .plot-container {{
+            width: 100%;
+            min-height: 600px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+            margin-bottom: 20px;
+        }}
+        
+        .controls {{
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }}
+        
+        .controls h3 {{
+            margin-bottom: 15px;
+            color: #495057;
+            font-size: 1.1em;
+        }}
+        
+        .btn {{
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }}
+        
+        .btn-primary {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }}
+        
+        .btn-primary:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }}
+        
+        .btn-secondary {{
+            background: #6c757d;
+            color: white;
+        }}
+        
+        .btn-secondary:hover {{
+            background: #5a6268;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(108, 117, 125, 0.4);
+        }}
+        
+        .info-box {{
+            padding: 15px;
+            background: #e7f3ff;
+            border-left: 4px solid #667eea;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            color: #004085;
+        }}
+        
+        .footer {{
+            padding: 20px 30px;
+            background: #f8f9fa;
+            text-align: center;
+            color: #6c757d;
+            font-size: 14px;
+            border-top: 1px solid #e9ecef;
+        }}
+        
+        .badge {{
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-left: 8px;
+        }}
+        
+        .badge-success {{
+            background: #d4edda;
+            color: #155724;
+        }}
+        
+        .badge-warning {{
+            background: #fff3cd;
+            color: #856404;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 TCLaaC Analysis Dashboard</h1>
+            <p>The Command Line as a Corpus - Interactive Topic Analysis</p>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('treemap')">
+                📊 Topic Treemap
+            </button>
+            <button class="tab" onclick="showTab('heatmap')">
+                🔥 Word Heatmap
+            </button>
+            <button class="tab" onclick="showTab('security')">
+                🛡️ Security Risk
+            </button>
+            <button class="tab" onclick="showTab('sunburst')">
+                🌟 Distribution
+            </button>
+            <button class="tab" onclick="showTab('length')">
+                📏 Complexity
+            </button>
+        </div>
+        
+        <div id="treemap" class="tab-content active">
+            <div class="info-box">
+                <strong>ℹ️ Topic Treemap:</strong> Hierarchical visualization of command groups by topic. 
+                Use the controls below to filter LOLBAS commands dynamically.
+            </div>
+            <div class="controls">
+                <h3>Filter Controls</h3>
+                <button class="btn btn-primary" onclick="filterLOLBAS()">
+                    🚫 Hide LOLBAS Commands
+                </button>
+                <button class="btn btn-secondary" onclick="showAll()">
+                    👁️ Show All Commands
+                </button>
+                <span id="filter-status" class="badge badge-success">Showing all commands</span>
+            </div>
+            <div id="treemap-plot" class="plot-container"></div>
+        </div>
+        
+        <div id="heatmap" class="tab-content">
+            <div class="info-box">
+                <strong>ℹ️ Topic-Word Heatmap:</strong> Distribution of top words across topics. 
+                Darker colors indicate higher word probability in that topic.
+            </div>
+            <div id="heatmap-plot" class="plot-container"></div>
+        </div>
+        
+        <div id="security" class="tab-content">
+            <div class="info-box">
+                <strong>ℹ️ Security Risk Analysis:</strong> LOLBAS density scores for each topic. 
+                Higher scores indicate more suspicious activity patterns.
+            </div>
+            <div id="security-plot" class="plot-container"></div>
+        </div>
+        
+        <div id="sunburst" class="tab-content">
+            <div class="info-box">
+                <strong>ℹ️ Topic Distribution:</strong> Hierarchical view showing the proportion of commands in each topic.
+                Click segments to zoom in.
+            </div>
+            <div id="sunburst-plot" class="plot-container"></div>
+        </div>
+        
+        <div id="length" class="tab-content">
+            <div class="info-box">
+                <strong>ℹ️ Command Complexity:</strong> Distribution of command length (token count) by topic.
+                Box plots show median, quartiles, and outliers.
+            </div>
+            <div id="length-plot" class="plot-container"></div>
+        </div>
+        
+        <div class="footer">
+            Generated by TCLaaC (The Command Line as a Corpus) | 
+            © 2025 | 
+            <a href="https://github.com/CampbellTrevor/TCLaaC" target="_blank" style="color: #667eea;">GitHub</a>
+        </div>
+    </div>
+    
+    <script>
+        // Store the original treemap data
+        let treemapData = {treemap_json};
+        let originalTreemapData = JSON.parse(JSON.stringify(treemapData));
+        let lolbasKeywords = {lolbas_json};
+        let isFiltered = false;
+        
+        // Initialize all plots
+        function initPlots() {{
+            // Treemap
+            Plotly.newPlot('treemap-plot', treemapData.data, treemapData.layout, {{responsive: true}});
+            
+            // Heatmap
+            let heatmapData = {heatmap_json};
+            Plotly.newPlot('heatmap-plot', heatmapData.data, heatmapData.layout, {{responsive: true}});
+            
+            // Security (if available)
+            let securityData = {security_json};
+            if (securityData !== null) {{
+                Plotly.newPlot('security-plot', securityData.data, securityData.layout, {{responsive: true}});
+            }} else {{
+                document.getElementById('security-plot').innerHTML = '<div style="padding: 40px; text-align: center; color: #6c757d;"><h3>Security analysis not available</h3><p>LOLBAS repository not found during analysis.</p></div>';
+            }}
+            
+            // Sunburst
+            let sunburstData = {sunburst_json};
+            Plotly.newPlot('sunburst-plot', sunburstData.data, sunburstData.layout, {{responsive: true}});
+            
+            // Length
+            let lengthData = {length_json};
+            Plotly.newPlot('length-plot', lengthData.data, lengthData.layout, {{responsive: true}});
+        }}
+        
+        // Tab switching
+        function showTab(tabName) {{
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {{
+                tab.classList.remove('active');
+            }});
+            document.querySelectorAll('.tab').forEach(tab => {{
+                tab.classList.remove('active');
+            }});
+            
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }}
+        
+        // Filter LOLBAS commands from treemap
+        function filterLOLBAS() {{
+            if (isFiltered) return;
+            
+            // Create a case-insensitive regex pattern from LOLBAS keywords
+            let pattern = new RegExp(lolbasKeywords.map(k => k.replace(/[.*+?^${{}}()|[\\]\\\\]/g, '\\\\$&')).join('|'), 'i');
+            
+            // Filter the treemap data
+            let filteredData = JSON.parse(JSON.stringify(originalTreemapData));
+            
+            // Filter labels and values
+            if (filteredData.data && filteredData.data[0]) {{
+                let labels = filteredData.data[0].labels || [];
+                let parents = filteredData.data[0].parents || [];
+                let values = filteredData.data[0].values || [];
+                
+                let newLabels = [];
+                let newParents = [];
+                let newValues = [];
+                
+                for (let i = 0; i < labels.length; i++) {{
+                    let label = labels[i];
+                    // Keep if it doesn't match LOLBAS pattern or is a parent node
+                    if (!pattern.test(label) || parents[i] === "" || label.includes("Topic")) {{
+                        newLabels.push(label);
+                        newParents.push(parents[i]);
+                        newValues.push(values[i]);
+                    }}
+                }}
+                
+                filteredData.data[0].labels = newLabels;
+                filteredData.data[0].parents = newParents;
+                filteredData.data[0].values = newValues;
+            }}
+            
+            Plotly.newPlot('treemap-plot', filteredData.data, filteredData.layout, {{responsive: true}});
+            
+            document.getElementById('filter-status').textContent = 'LOLBAS commands hidden';
+            document.getElementById('filter-status').className = 'badge badge-warning';
+            isFiltered = true;
+        }}
+        
+        // Show all commands
+        function showAll() {{
+            Plotly.newPlot('treemap-plot', originalTreemapData.data, originalTreemapData.layout, {{responsive: true}});
+            
+            document.getElementById('filter-status').textContent = 'Showing all commands';
+            document.getElementById('filter-status').className = 'badge badge-success';
+            isFiltered = false;
+        }}
+        
+        // Initialize on load
+        window.onload = initPlots;
+    </script>
+</body>
+</html>"""
+    
+    # Write to file
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)

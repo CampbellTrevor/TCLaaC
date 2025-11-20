@@ -377,8 +377,7 @@ def get_topic_results_gensim(lda_model: LdaMulticore, corpus: list, df_original:
     """
     Processes and appends LDA topic assignments from a gensim model to a DataFrame.
 
-    This function displays the top words for each topic and then assigns the
-    most likely topic to each document in the original DataFrame.
+    This function assigns the most likely topic to each document in the original DataFrame.
 
     Args:
         lda_model (LdaMulticore): The trained gensim LDA model.
@@ -396,15 +395,7 @@ def get_topic_results_gensim(lda_model: LdaMulticore, corpus: list, df_original:
         ValueError: If the number of rows in `df_original` does not match the
                     number of documents in the `corpus`.
     """
-    print("\nStep 3: Displaying topics and assigning to DataFrame...")
-
-    # Part 1: Display the top words for each topic for initial inspection.
-    # The .print_topics() method provides the most probable words for each topic.
-    print("Top words for each topic:")
-    for topic_idx, topic in lda_model.print_topics(num_words=5):
-        print(f"Topic #{topic_idx}: {topic}")
-
-    # Part 2: Assign the single most likely topic to each document.
+    # Assign the single most likely topic to each document.
     topic_assignments = []
     for doc_bow in corpus:
         # get_document_topics returns a list of (topic_id, probability) tuples.
@@ -432,7 +423,6 @@ def get_topic_results_gensim(lda_model: LdaMulticore, corpus: list, df_original:
     # directly corresponds to the order of documents in the corpus and DataFrame.
     df_result['topic'] = topic_assignments
 
-    print("\nTopic assignment complete.")
     return df_result
 
 def generate_tfidf_summaries(lda_model: LatentDirichletAllocation, doc_term_matrix: np.ndarray, vectorizer, df_with_topics: pd.DataFrame, n_top_words: int = 10) -> dict:
@@ -523,62 +513,103 @@ def generate_tfidf_summaries(lda_model: LatentDirichletAllocation, doc_term_matr
 
 def analyze_malicious_topics(df_with_topics: pd.DataFrame, suspicious_keywords: list) -> pd.DataFrame:
     """
-    Scores topics based on suspicious keyword concentration and shows breakdowns.
+    Scores topics based on LOLBAS density and command patterns.
 
     This function analyzes a DataFrame of documents with assigned topics. It
-    calculates a "suspicious score" for each topic based on the percentage of
-    its documents that contain keywords from a provided list. It safely handles
-    special regex characters in the keywords.
+    calculates a "LOLBAS density" score for each topic based on multiple factors:
+    - Percentage of documents containing LOLBAS binaries
+    - Number of unique LOLBAS binaries in the topic
+    - Average number of LOLBAS matches per document
+    
+    This provides a more nuanced security risk assessment than simple keyword matching.
 
     Args:
         df_with_topics (pd.DataFrame): DataFrame containing at least 'topic'
             and 'command_line' columns.
-        suspicious_keywords (list): A list of strings representing suspicious
-            keywords to search for.
+        suspicious_keywords (list): A list of strings representing LOLBAS
+            binaries to search for.
 
     Returns:
         pd.DataFrame: A DataFrame indexed by topic ID, containing counts,
-            suspicious percentage scores, and detailed keyword breakdowns.
+            LOLBAS density scores, and detailed keyword breakdowns.
     """
-    print("--- Analyzing topics for suspicious activity and keywords ---")
+    logger = logging.getLogger(__name__)
+    logger.info("Analyzing topics using LOLBAS density metrics...")
 
-    # Step 1: Flag individual commands that contain any suspicious keyword.
+    # Step 1: Flag individual commands that contain any LOLBAS binary.
     # Each keyword is escaped to ensure special characters (e.g., '.', '*')
     # are treated as literals, preventing regex errors or misinterpretations.
     escaped_keywords = [re.escape(kw) for kw in suspicious_keywords]
     pattern = r'\b(' + '|'.join(escaped_keywords) + r')\b'
     
-    df_with_topics['is_suspicious'] = df_with_topics['command_line'].str.contains(
+    df_with_topics['contains_lolbas'] = df_with_topics['command_line'].str.contains(
         pattern, 
-        regex=True
-    )
-
-    # Step 2: Score each topic by aggregating the suspicious flags.
-    # This calculates the total commands and suspicious commands per topic.
-    topic_scores = df_with_topics.groupby('topic')['is_suspicious'].agg(
-        suspicious_count='sum', 
-        total_count='size'
-    )
-    topic_scores['suspicious_percentage'] = (topic_scores['suspicious_count'] / topic_scores['total_count']) * 100
-    topic_scores = topic_scores.sort_values(by='suspicious_percentage', ascending=False)
-
-    # Step 3: Extract the specific keyword that was matched in each suspicious command.
-    suspicious_df = df_with_topics[df_with_topics['is_suspicious']].copy()
-    suspicious_df['matched_keyword'] = suspicious_df['command_line'].str.extract(
-        pattern, 
-        expand=False
+        regex=True,
+        na=False
     )
     
-    # Step 4: Create a summary of keyword counts for each topic.
-    keyword_summary = suspicious_df.groupby('topic')['matched_keyword'].value_counts()
+    # Count LOLBAS matches per command
+    df_with_topics['lolbas_count'] = df_with_topics['command_line'].str.findall(pattern).apply(len)
 
-    # Step 5: Display a summary of the most suspicious topics and their keywords.
-    print("\n--- Top 5 Most Suspicious Topics ---")
+    # Step 2: Calculate comprehensive metrics per topic
+    topic_metrics = []
+    
+    for topic_id in df_with_topics['topic'].unique():
+        topic_data = df_with_topics[df_with_topics['topic'] == topic_id]
+        total_docs = len(topic_data)
+        lolbas_docs = topic_data['contains_lolbas'].sum()
+        
+        # Calculate density metrics
+        lolbas_percentage = (lolbas_docs / total_docs) * 100 if total_docs > 0 else 0
+        
+        # Count unique LOLBAS binaries in this topic
+        if lolbas_docs > 0:
+            all_matches = topic_data[topic_data['contains_lolbas']]['command_line'].str.findall(pattern).sum()
+            unique_lolbas = len(set(all_matches))
+            avg_lolbas_per_doc = topic_data['lolbas_count'].sum() / total_docs
+        else:
+            unique_lolbas = 0
+            avg_lolbas_per_doc = 0
+        
+        # Calculate LOLBAS density score (weighted metric)
+        # Formula: (percentage * 0.5) + (unique_binaries * 5) + (avg_per_doc * 10)
+        # This balances prevalence, diversity, and intensity of LOLBAS usage
+        lolbas_density = (lolbas_percentage * 0.5) + (unique_lolbas * 5) + (avg_lolbas_per_doc * 10)
+        
+        topic_metrics.append({
+            'topic': topic_id,
+            'total_count': total_docs,
+            'lolbas_count': int(lolbas_docs),
+            'lolbas_percentage': lolbas_percentage,
+            'unique_lolbas': unique_lolbas,
+            'avg_lolbas_per_doc': avg_lolbas_per_doc,
+            'lolbas_density': lolbas_density
+        })
+    
+    topic_scores = pd.DataFrame(topic_metrics).set_index('topic')
+    topic_scores = topic_scores.sort_values(by='lolbas_density', ascending=False)
+
+    # Step 3: Extract the specific binaries matched in each topic
+    lolbas_df = df_with_topics[df_with_topics['contains_lolbas']].copy()
+    lolbas_df['matched_lolbas'] = lolbas_df['command_line'].str.findall(pattern)
+    
+    # Step 4: Display summary of most suspicious topics
+    logger.info("\n=== Top 5 Highest Risk Topics (by LOLBAS Density) ===")
     for topic_id, row in topic_scores.head(5).iterrows():
-        print(f"\nTopic #{topic_id} | Suspicious Score: {row['suspicious_percentage']:.2f}% ({int(row['suspicious_count'])} of {int(row['total_count'])})")
-        if topic_id in keyword_summary.index:
-            print("  Most Frequent Suspicious Keywords:")
-            print(keyword_summary.loc[topic_id].to_string())
+        logger.info(f"\n🔴 Topic #{topic_id} | Risk Score: {row['lolbas_density']:.2f}")
+        logger.info(f"   LOLBAS Coverage: {row['lolbas_percentage']:.1f}% ({int(row['lolbas_count'])} of {int(row['total_count'])} docs)")
+        logger.info(f"   Unique Binaries: {row['unique_lolbas']}")
+        logger.info(f"   Avg per Document: {row['avg_lolbas_per_doc']:.2f}")
+        
+        # Show most common LOLBAS binaries in this topic
+        topic_lolbas = lolbas_df[lolbas_df['topic'] == topic_id]
+        if len(topic_lolbas) > 0:
+            all_binaries = [binary for binaries in topic_lolbas['matched_lolbas'] for binary in binaries]
+            from collections import Counter
+            top_binaries = Counter(all_binaries).most_common(5)
+            logger.info("   Top LOLBAS Binaries:")
+            for binary, count in top_binaries:
+                logger.info(f"     • {binary}: {count}x")
     
     return topic_scores
 

